@@ -1,0 +1,388 @@
+# 📊 Weekly Stats Workflow
+#
+# This workflow generates comprehensive weekly activity reports:
+# - Collects commit statistics and top contributors
+# - Analyzes activity patterns and trends
+# - Creates issues with weekly highlights and achievements
+# - Provides insights for team productivity
+# - Can be manually triggered for demos and on-demand reports
+#
+# 🎯 Perfect for team retrospectives and progress tracking!
+
+name: 📊 Weekly Stats
+
+# 🚀 Trigger conditions
+on:
+  schedule:
+    # 📅 Run every Monday at 9:00 AM UTC (customize as needed)
+    - cron: '0 9 * * 1'
+  workflow_dispatch:  # 🎮 Allow manual triggering for demos
+    inputs:
+      days_back:
+        description: '📅 Number of days to analyze (default: 7)'
+        required: false
+        default: '7'
+        type: string
+      include_stats:
+        description: '📊 Include detailed statistics'
+        required: false
+        default: true
+        type: boolean
+
+# 🔧 Workflow jobs
+jobs:
+  # 📈 Generate Weekly Report
+  weekly-report:
+    name: 📊 Generate Team Weekly Report
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 📥 Checkout repository with full history
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          # 🔍 Fetch full history for comprehensive analysis
+          fetch-depth: 0
+          
+      # ⚙️ Setup analysis parameters
+      - name: ⚙️ Setup Analysis Parameters
+        id: setup
+        run: |
+          # 📅 Calculate analysis period
+          DAYS_BACK="${{ github.event.inputs.days_back || '7' }}"
+          INCLUDE_STATS="${{ github.event.inputs.include_stats || 'true' }}"
+          
+          # 🕒 Calculate date range
+          END_DATE=$(date '+%Y-%m-%d')
+          START_DATE=$(date -d "$DAYS_BACK days ago" '+%Y-%m-%d')
+          
+          echo "days_back=$DAYS_BACK" >> $GITHUB_OUTPUT
+          echo "include_stats=$INCLUDE_STATS" >> $GITHUB_OUTPUT
+          echo "start_date=$START_DATE" >> $GITHUB_OUTPUT
+          echo "end_date=$END_DATE" >> $GITHUB_OUTPUT
+          
+          # 📋 Report metadata
+          REPORT_WEEK=$(date '+Week %V, %Y')
+          REPORT_TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S UTC')
+          
+          echo "report_week=$REPORT_WEEK" >> $GITHUB_OUTPUT
+          echo "report_timestamp=$REPORT_TIMESTAMP" >> $GITHUB_OUTPUT
+          
+          echo "📊 Analyzing period: $START_DATE to $END_DATE ($DAYS_BACK days)"
+          
+      # 📊 Collect Git Statistics
+      - name: 📊 Collect Git Statistics
+        id: git-stats
+        run: |
+          START_DATE="${{ steps.setup.outputs.start_date }}"
+          DAYS_BACK="${{ steps.setup.outputs.days_back }}"
+          
+          echo "🔍 Collecting git statistics for the last $DAYS_BACK days..."
+          
+          # 📈 Basic commit statistics
+          TOTAL_COMMITS=$(git rev-list --since="$DAYS_BACK days ago" --count HEAD 2>/dev/null || echo "0")
+          TOTAL_AUTHORS=$(git shortlog --since="$DAYS_BACK days ago" -sn HEAD 2>/dev/null | wc -l || echo "0")
+          
+          echo "total_commits=$TOTAL_COMMITS" >> $GITHUB_OUTPUT
+          echo "total_authors=$TOTAL_AUTHORS" >> $GITHUB_OUTPUT
+          
+          # 👥 Top contributors (last 7 days)
+          echo "🏆 Top Contributors:" > weekly_stats.md
+          if [ "$TOTAL_COMMITS" -gt "0" ]; then
+            git shortlog --since="$DAYS_BACK days ago" -sn HEAD | head -5 | while read count author; do
+              echo "- **$author**: $count commits" >> weekly_stats.md
+            done
+          else
+            echo "- No commits in the analyzed period" >> weekly_stats.md
+          fi
+          
+          # 📅 Daily activity breakdown
+          echo -e "\n📅 Daily Activity:" >> weekly_stats.md
+          for i in $(seq 0 $((DAYS_BACK-1))); do
+            DATE=$(date -d "$i days ago" '+%Y-%m-%d')
+            DAY_NAME=$(date -d "$i days ago" '+%A')
+            DAILY_COMMITS=$(git rev-list --since="$DATE 00:00:00" --until="$DATE 23:59:59" --count HEAD 2>/dev/null || echo "0")
+            echo "- **$DAY_NAME ($DATE)**: $DAILY_COMMITS commits" >> weekly_stats.md
+          done
+          
+          # 📊 File change statistics
+          echo -e "\n📁 File Change Summary:" >> weekly_stats.md
+          if [ "$TOTAL_COMMITS" -gt "0" ]; then
+            TOTAL_ADDITIONS=$(git log --since="$DAYS_BACK days ago" --pretty=tformat: --numstat | awk '{add+=$1} END {print add+0}')
+            TOTAL_DELETIONS=$(git log --since="$DAYS_BACK days ago" --pretty=tformat: --numstat | awk '{del+=$2} END {print del+0}')
+            FILES_CHANGED=$(git log --since="$DAYS_BACK days ago" --name-only --pretty=format: | sort -u | wc -l)
+            
+            echo "- **Lines added**: +$TOTAL_ADDITIONS" >> weekly_stats.md
+            echo "- **Lines removed**: -$TOTAL_DELETIONS" >> weekly_stats.md
+            echo "- **Files changed**: $FILES_CHANGED" >> weekly_stats.md
+            echo "- **Net change**: $((TOTAL_ADDITIONS - TOTAL_DELETIONS)) lines" >> weekly_stats.md
+            
+            echo "total_additions=$TOTAL_ADDITIONS" >> $GITHUB_OUTPUT
+            echo "total_deletions=$TOTAL_DELETIONS" >> $GITHUB_OUTPUT
+            echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
+          else
+            echo "- No file changes in the analyzed period" >> weekly_stats.md
+            echo "total_additions=0" >> $GITHUB_OUTPUT
+            echo "total_deletions=0" >> $GITHUB_OUTPUT
+            echo "files_changed=0" >> $GITHUB_OUTPUT
+          fi
+          
+      # 🎯 Analyze Activity Patterns
+      - name: 🎯 Analyze Activity Patterns
+        id: activity-patterns
+        run: |
+          TOTAL_COMMITS="${{ steps.git-stats.outputs.total_commits }}"
+          DAYS_BACK="${{ steps.setup.outputs.days_back }}"
+          
+          echo "🔍 Analyzing activity patterns..."
+          
+          # 🕒 Time-based analysis
+          echo -e "\n⏰ Activity Patterns:" >> weekly_stats.md
+          
+          if [ "$TOTAL_COMMITS" -gt "0" ]; then
+            # 📊 Hour distribution (simplified)
+            echo "- **Peak activity hours**: Based on commit timestamps" >> weekly_stats.md
+            
+            # 📈 Weekday vs Weekend
+            WEEKDAY_COMMITS=$(git log --since="$DAYS_BACK days ago" --pretty=format:'%ad' --date=format:'%u' | grep -c '[1-5]' || echo "0")
+            WEEKEND_COMMITS=$(git log --since="$DAYS_BACK days ago" --pretty=format:'%ad' --date=format:'%u' | grep -c '[67]' || echo "0")
+            
+            echo "- **Weekday commits**: $WEEKDAY_COMMITS" >> weekly_stats.md
+            echo "- **Weekend commits**: $WEEKEND_COMMITS" >> weekly_stats.md
+            
+            # 🎯 Activity intensity
+            AVG_COMMITS_PER_DAY=$(echo "scale=1; $TOTAL_COMMITS / $DAYS_BACK" | bc 2>/dev/null || echo "0")
+            echo "- **Average commits per day**: $AVG_COMMITS_PER_DAY" >> weekly_stats.md
+            
+            echo "weekday_commits=$WEEKDAY_COMMITS" >> $GITHUB_OUTPUT
+            echo "weekend_commits=$WEEKEND_COMMITS" >> $GITHUB_OUTPUT
+            echo "avg_commits_per_day=$AVG_COMMITS_PER_DAY" >> $GITHUB_OUTPUT
+          else
+            echo "- No activity to analyze in this period" >> weekly_stats.md
+            echo "weekday_commits=0" >> $GITHUB_OUTPUT
+            echo "weekend_commits=0" >> $GITHUB_OUTPUT
+            echo "avg_commits_per_day=0" >> $GITHUB_OUTPUT
+          fi
+          
+      # 🏆 Generate Achievements and Highlights
+      - name: 🏆 Generate Achievements
+        id: achievements
+        run: |
+          TOTAL_COMMITS="${{ steps.git-stats.outputs.total_commits }}"
+          TOTAL_AUTHORS="${{ steps.git-stats.outputs.total_authors }}"
+          TOTAL_ADDITIONS="${{ steps.git-stats.outputs.total_additions }}"
+          FILES_CHANGED="${{ steps.git-stats.outputs.files_changed }}"
+          
+          echo "🏆 Generating team achievements..."
+          
+          # 🌟 Generate achievements based on activity
+          echo -e "\n🏆 Weekly Achievements:" >> weekly_stats.md
+          
+          achievements=()
+          
+          # 📊 Commit-based achievements
+          if [ "$TOTAL_COMMITS" -gt "50" ]; then
+            achievements+=("🚀 **High Velocity Team** - Over 50 commits this week!")
+          elif [ "$TOTAL_COMMITS" -gt "20" ]; then
+            achievements+=("⚡ **Active Development** - Great coding momentum!")
+          elif [ "$TOTAL_COMMITS" -gt "5" ]; then
+            achievements+=("📈 **Steady Progress** - Consistent development pace!")
+          fi
+          
+          # 👥 Collaboration achievements
+          if [ "$TOTAL_AUTHORS" -gt "5" ]; then
+            achievements+=("👥 **Strong Collaboration** - Multiple team members contributing!")
+          elif [ "$TOTAL_AUTHORS" -gt "2" ]; then
+            achievements+=("🤝 **Team Effort** - Great teamwork this week!")
+          fi
+          
+          # 📝 Code quality achievements
+          if [ "$TOTAL_ADDITIONS" -gt "1000" ]; then
+            achievements+=("📝 **Significant Development** - Major code contributions!")
+          fi
+          
+          if [ "$FILES_CHANGED" -gt "50" ]; then
+            achievements+=("🔄 **Comprehensive Changes** - Wide-ranging improvements!")
+          fi
+          
+          # 🎯 Special achievements
+          achievements+=("🌟 **Weekly Report Generated** - Keeping track of our progress!")
+          
+          # 📋 Add achievements to report
+          if [ ${#achievements[@]} -gt 0 ]; then
+            for achievement in "${achievements[@]}"; do
+              echo "- $achievement" >> weekly_stats.md
+            done
+          else
+            echo "- 🌱 **Building Momentum** - Every journey starts with a single step!" >> weekly_stats.md
+          fi
+          
+          # 🎯 Set achievement count for issue creation
+          echo "achievement_count=${#achievements[@]}" >> $GITHUB_OUTPUT
+          
+      # 💡 Generate Insights and Recommendations
+      - name: 💡 Generate Insights
+        run: |
+          TOTAL_COMMITS="${{ steps.git-stats.outputs.total_commits }}"
+          TOTAL_AUTHORS="${{ steps.git-stats.outputs.total_authors }}"
+          AVG_COMMITS="${{ steps.activity-patterns.outputs.avg_commits_per_day }}"
+          WEEKDAY_COMMITS="${{ steps.activity-patterns.outputs.weekday_commits }}"
+          WEEKEND_COMMITS="${{ steps.activity-patterns.outputs.weekend_commits }}"
+          
+          echo "💡 Generating insights and recommendations..."
+          
+          echo -e "\n💡 Insights & Recommendations:" >> weekly_stats.md
+          
+          # 📊 Activity analysis
+          if [ "$TOTAL_COMMITS" -eq "0" ]; then
+            echo "- 🌱 **Getting Started**: Consider setting up regular development schedules" >> weekly_stats.md
+            echo "- 📋 **Next Steps**: Plan some initial features or improvements" >> weekly_stats.md
+          elif [ "$TOTAL_COMMITS" -lt "10" ]; then
+            echo "- 📈 **Growth Opportunity**: Consider increasing development frequency" >> weekly_stats.md
+            echo "- 🎯 **Focus Areas**: Identify key features to prioritize" >> weekly_stats.md
+          else
+            echo "- ✅ **Great Activity**: Excellent development momentum!" >> weekly_stats.md
+            echo "- 🔄 **Keep It Up**: Maintain this productive pace" >> weekly_stats.md
+          fi
+          
+          # 👥 Team collaboration insights
+          if [ "$TOTAL_AUTHORS" -eq "1" ]; then
+            echo "- 🤝 **Collaboration**: Consider encouraging more team participation" >> weekly_stats.md
+          elif [ "$TOTAL_AUTHORS" -gt "3" ]; then
+            echo "- 🌟 **Excellent Teamwork**: Great collaborative development!" >> weekly_stats.md
+          fi
+          
+          # ⏰ Time pattern insights
+          if [ "$WEEKEND_COMMITS" -gt "$WEEKDAY_COMMITS" ]; then
+            echo "- ⚖️ **Work-Life Balance**: Most activity on weekends - consider work distribution" >> weekly_stats.md
+          fi
+          
+          # 🎯 General recommendations
+          echo "- 📊 **Regular Monitoring**: Keep tracking progress with weekly reports" >> weekly_stats.md
+          echo "- 🎉 **Celebrate Wins**: Acknowledge team achievements and milestones" >> weekly_stats.md
+          echo "- 🚀 **Continuous Improvement**: Use insights to optimize development process" >> weekly_stats.md
+          
+      # 📝 Create Weekly Report Issue
+      - name: 📝 Create Weekly Report Issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            
+            // 📊 Read the generated stats
+            const statsContent = fs.readFileSync('weekly_stats.md', 'utf8');
+            
+            // 📋 Get report metadata
+            const reportWeek = '${{ steps.setup.outputs.report_week }}';
+            const reportTimestamp = '${{ steps.setup.outputs.report_timestamp }}';
+            const daysBack = '${{ steps.setup.outputs.days_back }}';
+            const totalCommits = '${{ steps.git-stats.outputs.total_commits }}';
+            const totalAuthors = '${{ steps.git-stats.outputs.total_authors }}';
+            const achievementCount = '${{ steps.achievements.outputs.achievement_count }}';
+            
+            // 🎨 Build comprehensive report
+            const reportTitle = `📊 Weekly Team Report - ${reportWeek}`;
+            
+            const reportBody = `# 📊 Weekly Team Report
+            
+            **Report Period:** ${reportWeek} (Last ${daysBack} days)  
+            **Generated:** ${reportTimestamp}  
+            **Total Activity:** ${totalCommits} commits by ${totalAuthors} contributors
+            
+            ## 📈 Executive Summary
+            
+            ${totalCommits > 20 ? '🚀 **High Activity Week**' : totalCommits > 5 ? '📈 **Steady Progress**' : '🌱 **Building Momentum**'} - This week saw ${totalCommits} commits from ${totalAuthors} team member${totalAuthors !== '1' ? 's' : ''}, demonstrating ${totalCommits > 10 ? 'excellent' : 'good'} development momentum.
+            
+            ${statsContent}
+            
+            ## 🎯 Key Metrics Dashboard
+            
+            | Metric | Value | Trend |
+            |--------|-------|-------|
+            | 📋 Total Commits | ${totalCommits} | ${totalCommits > 20 ? '📈 High' : totalCommits > 5 ? '📊 Steady' : '📉 Low'} |
+            | 👥 Active Contributors | ${totalAuthors} | ${totalAuthors > 3 ? '🌟 Excellent' : totalAuthors > 1 ? '👍 Good' : '💡 Growing'} |
+            | 🏆 Achievements Unlocked | ${achievementCount} | 🎉 Celebrating |
+            | 📊 Average Daily Commits | ${{ steps.activity-patterns.outputs.avg_commits_per_day }} | 📈 Tracking |
+            
+            ## 🎯 Action Items for Next Week
+            
+            Based on this week's analysis, here are some suggestions for the upcoming week:
+            
+            - [ ] 📋 **Review Progress**: Assess completed work and plan next priorities
+            - [ ] 🎯 **Set Goals**: Define clear objectives for the coming week
+            - [ ] 🤝 **Team Sync**: Share insights and coordinate efforts
+            - [ ] 📊 **Monitor Trends**: Keep an eye on productivity patterns
+            - [ ] 🎉 **Celebrate**: Acknowledge team achievements and progress
+            
+            ## 🚀 Looking Ahead
+            
+            ${totalCommits > 15 ? 
+              'Excellent momentum this week! Keep up the fantastic work and maintain this productive pace.' : 
+              totalCommits > 5 ? 
+                'Good progress this week! Consider identifying opportunities to increase development velocity.' :
+                'Building momentum! Focus on consistent daily progress and team collaboration.'
+            }
+            
+            ---
+            
+            > 🤖 **Automated Weekly Report** | Generated by GitHub Actions Weekly Stats Workflow  
+            > 📅 **Next Report**: ${new Date(Date.now() + 7*24*60*60*1000).toLocaleDateString()}  
+            > 🔄 **Manual Trigger**: Use "Run workflow" for on-demand reports
+            
+            ## 📊 Report Configuration
+            
+            - **Analysis Period**: ${daysBack} days
+            - **Include Detailed Stats**: ${{ steps.setup.outputs.include_stats }}
+            - **Generated Via**: ${{ github.event_name === 'workflow_dispatch' ? 'Manual Trigger' : 'Scheduled Run' }}
+            `;
+            
+            // 📝 Create the issue
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: reportTitle,
+              body: reportBody,
+              labels: ['📊 weekly-report', '🤖 automation', '📈 analytics'],
+              assignees: [] // Could assign to team leads
+            });
+            
+            console.log(`📝 Created weekly report issue #${issue.data.number}`);
+            
+            // 🎯 Also create a summary comment on the issue
+            const summaryComment = `## 🎯 Quick Summary
+            
+            This week's highlights:
+            - 📊 **${totalCommits} commits** from **${totalAuthors} contributors**
+            - 🏆 **${achievementCount} achievements** unlocked
+            - 📈 **${{ steps.activity-patterns.outputs.avg_commits_per_day }}** average daily commits
+            
+            ${totalCommits > 20 ? '🚀 Outstanding week!' : totalCommits > 5 ? '👍 Great progress!' : '🌱 Keep building!'}
+            
+            ---
+            
+            > 📋 Use this issue to track weekly goals and discuss team progress!`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.data.number,
+              body: summaryComment
+            });
+            
+      # 📊 Generate Analytics Summary
+      - name: 📊 Analytics Summary
+        run: |
+          echo "📊 Weekly Analytics Summary"
+          echo "=========================="
+          echo "📅 Report Week: ${{ steps.setup.outputs.report_week }}"
+          echo "📈 Total Commits: ${{ steps.git-stats.outputs.total_commits }}"
+          echo "👥 Contributors: ${{ steps.git-stats.outputs.total_authors }}"
+          echo "📝 Lines Added: +${{ steps.git-stats.outputs.total_additions }}"
+          echo "🗑️ Lines Removed: -${{ steps.git-stats.outputs.total_deletions }}"
+          echo "📁 Files Changed: ${{ steps.git-stats.outputs.files_changed }}"
+          echo "🏆 Achievements: ${{ steps.achievements.outputs.achievement_count }}"
+          echo "⚡ Avg Daily Commits: ${{ steps.activity-patterns.outputs.avg_commits_per_day }}"
+          echo ""
+          echo "🎯 Report successfully generated and posted as GitHub issue!"
+          echo "📊 Use this data for team retrospectives and planning sessions."

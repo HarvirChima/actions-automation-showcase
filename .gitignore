@@ -1,0 +1,62 @@
+# 🗂️ GitHub Actions Automation Showcase - Git Ignore
+# Excludes files from version control for cleaner repository
+
+# 📦 Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 📊 Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# 📝 Logs
+logs
+*.log
+
+# 🔐 Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 🛠️ IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 💾 OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 🏗️ Build outputs
+dist/
+build/
+out/
+
+# 📱 Coverage directory used by tools like istanbul
+coverage/
+.nyc_output
+
+# 🧪 Test artifacts
+test-results/
+*.test.js.snap
+
+# 🚀 Deployment
+.vercel
+.netlify
+
+# 📊 Temporary files
+tmp/
+temp/
