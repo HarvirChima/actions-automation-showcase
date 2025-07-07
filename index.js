@@ -15,7 +15,7 @@ const port = process.env.PORT || 3000;
 let stats = {
   visits: 0,
   startTime: new Date(),
-  version: '1.0.0'
+  version: '1.0.1'
 };
 
 // 🏠 Home route with automation showcase info
