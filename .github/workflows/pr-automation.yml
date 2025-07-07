@@ -1,0 +1,336 @@
+# 🏷️ Pull Request Automation Workflow
+#
+# This workflow provides intelligent PR automation:
+# - Auto-labels PRs based on file changes and content
+# - Analyzes PR size (small, medium, large)
+# - Detects documentation, tests, and configuration changes
+# - Adds helpful comments with detailed PR analysis
+# - Assigns appropriate reviewers based on changes
+#
+# 🎯 Makes PR management effortless and consistent!
+
+name: 🏷️ PR Automation
+
+# 🚀 Trigger conditions
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: ['main', 'develop']
+
+# 🔐 Required permissions for this workflow
+permissions:
+  issues: write        # 🏷️ Add labels and create comments
+  pull-requests: write # 🏷️ Add labels and create comments
+  contents: read       # 📖 Read repository contents
+
+# 🔧 Workflow jobs
+jobs:
+  # 🏷️ PR Analysis and Labeling Job
+  pr-analysis:
+    name: 🔍 Analyze Pull Request
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 📥 Checkout the repository
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          # 🔍 Fetch the PR branch and base for comparison
+          fetch-depth: 0
+          
+      # 📊 Analyze PR changes
+      - name: 📊 Analyze PR Changes
+        id: pr-analysis
+        run: |
+          # 🎯 Get PR information
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "base_sha=$BASE_SHA" >> $GITHUB_OUTPUT
+          echo "head_sha=$HEAD_SHA" >> $GITHUB_OUTPUT
+          
+          # 📈 Calculate PR statistics
+          CHANGED_FILES=$(git diff --name-only $BASE_SHA...$HEAD_SHA | wc -l)
+          ADDITIONS=$(git diff --shortstat $BASE_SHA...$HEAD_SHA | grep -oE '[0-9]+ insertions?' | grep -oE '[0-9]+' || echo "0")
+          DELETIONS=$(git diff --shortstat $BASE_SHA...$HEAD_SHA | grep -oE '[0-9]+ deletions?' | grep -oE '[0-9]+' || echo "0")
+          
+          echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "additions=$ADDITIONS" >> $GITHUB_OUTPUT
+          echo "deletions=$DELETIONS" >> $GITHUB_OUTPUT
+          
+          # 📏 Determine PR size
+          TOTAL_CHANGES=$((ADDITIONS + DELETIONS))
+          if [ "$TOTAL_CHANGES" -le 50 ]; then
+            PR_SIZE="small"
+            SIZE_EMOJI="🟢"
+            SIZE_COLOR="0e8a16"
+          elif [ "$TOTAL_CHANGES" -le 200 ]; then
+            PR_SIZE="medium"
+            SIZE_EMOJI="🟡"
+            SIZE_COLOR="fbca04"
+          else
+            PR_SIZE="large"
+            SIZE_EMOJI="🔴"
+            SIZE_COLOR="d73a4a"
+          fi
+          
+          echo "pr_size=$PR_SIZE" >> $GITHUB_OUTPUT
+          echo "size_emoji=$SIZE_EMOJI" >> $GITHUB_OUTPUT
+          echo "size_color=$SIZE_COLOR" >> $GITHUB_OUTPUT
+          
+          # 📋 Analyze file types and patterns
+          git diff --name-only $BASE_SHA...$HEAD_SHA > changed_files.txt
+          
+          # 🔍 Detect change categories
+          HAS_DOCS=$(grep -E '\.(md|rst|txt)$|^docs/' changed_files.txt | wc -l)
+          HAS_TESTS=$(grep -E '\.test\.|\.spec\.|test/|tests/|__tests__/' changed_files.txt | wc -l)
+          HAS_CONFIG=$(grep -E '\.(json|yml|yaml|toml|ini|cfg)$|\.config\.|\.env' changed_files.txt | wc -l)
+          HAS_FRONTEND=$(grep -E '\.(js|ts|jsx|tsx|vue|css|scss|html)$' changed_files.txt | wc -l)
+          HAS_BACKEND=$(grep -E '\.(py|java|go|rb|php|cs|cpp|c)$' changed_files.txt | wc -l)
+          HAS_WORKFLOWS=$(grep -E '\.github/workflows/' changed_files.txt | wc -l)
+          HAS_DEPENDENCIES=$(grep -E 'package\.json|requirements\.txt|Gemfile|go\.mod|pom\.xml' changed_files.txt | wc -l)
+          
+          echo "has_docs=$HAS_DOCS" >> $GITHUB_OUTPUT
+          echo "has_tests=$HAS_TESTS" >> $GITHUB_OUTPUT
+          echo "has_config=$HAS_CONFIG" >> $GITHUB_OUTPUT
+          echo "has_frontend=$HAS_FRONTEND" >> $GITHUB_OUTPUT
+          echo "has_backend=$HAS_BACKEND" >> $GITHUB_OUTPUT
+          echo "has_workflows=$HAS_WORKFLOWS" >> $GITHUB_OUTPUT
+          echo "has_dependencies=$HAS_DEPENDENCIES" >> $GITHUB_OUTPUT
+          
+          # 🎯 Determine primary change type
+          if [ "$HAS_WORKFLOWS" -gt "0" ]; then
+            PRIMARY_TYPE="workflow"
+          elif [ "$HAS_TESTS" -gt "0" ] && [ "$HAS_TESTS" -ge "$HAS_FRONTEND" ] && [ "$HAS_TESTS" -ge "$HAS_BACKEND" ]; then
+            PRIMARY_TYPE="testing"
+          elif [ "$HAS_DOCS" -gt "0" ] && [ "$HAS_DOCS" -ge "$HAS_FRONTEND" ] && [ "$HAS_DOCS" -ge "$HAS_BACKEND" ]; then
+            PRIMARY_TYPE="documentation"
+          elif [ "$HAS_CONFIG" -gt "0" ] && [ "$HAS_CONFIG" -ge "$HAS_FRONTEND" ] && [ "$HAS_CONFIG" -ge "$HAS_BACKEND" ]; then
+            PRIMARY_TYPE="configuration"
+          elif [ "$HAS_FRONTEND" -gt "0" ] && [ "$HAS_FRONTEND" -gt "$HAS_BACKEND" ]; then
+            PRIMARY_TYPE="frontend"
+          elif [ "$HAS_BACKEND" -gt "0" ]; then
+            PRIMARY_TYPE="backend"
+          else
+            PRIMARY_TYPE="general"
+          fi
+          
+          echo "primary_type=$PRIMARY_TYPE" >> $GITHUB_OUTPUT
+          
+      # 🏷️ Auto-label the PR
+      - name: 🏷️ Apply Auto Labels
+        uses: actions/github-script@v7
+        continue-on-error: true  # 🛡️ Continue if labeling fails
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              const prNumber = ${{ steps.pr-analysis.outputs.pr_number }};
+              const labels = [];
+              
+              // 📏 Size label
+              const sizeLabel = `size/${{ steps.pr-analysis.outputs.pr_size }}`;
+              labels.push(sizeLabel);
+              
+              // 🎯 Type-based labels
+              if (${{ steps.pr-analysis.outputs.has_docs }} > 0) {
+                labels.push('📚 documentation');
+              }
+              if (${{ steps.pr-analysis.outputs.has_tests }} > 0) {
+                labels.push('🧪 testing');
+              }
+              if (${{ steps.pr-analysis.outputs.has_config }} > 0) {
+                labels.push('⚙️ configuration');
+              }
+              if (${{ steps.pr-analysis.outputs.has_frontend }} > 0) {
+                labels.push('🎨 frontend');
+              }
+              if (${{ steps.pr-analysis.outputs.has_backend }} > 0) {
+                labels.push('⚡ backend');
+              }
+              if (${{ steps.pr-analysis.outputs.has_workflows }} > 0) {
+                labels.push('🤖 workflow');
+              }
+              if (${{ steps.pr-analysis.outputs.has_dependencies }} > 0) {
+                labels.push('📦 dependencies');
+              }
+              
+              // 🚨 Special attention labels
+              if (${{ steps.pr-analysis.outputs.changed_files }} > 20) {
+                labels.push('🔍 needs-careful-review');
+              }
+              if (${{ steps.pr-analysis.outputs.additions }} > 500) {
+                labels.push('📈 large-addition');
+              }
+              if (${{ steps.pr-analysis.outputs.deletions }} > 100) {
+                labels.push('🗑️ large-deletion');
+              }
+              
+              // 🎯 Primary type label
+              const primaryType = '${{ steps.pr-analysis.outputs.primary_type }}';
+              if (primaryType !== 'general') {
+                labels.push(`type:${primaryType}`);
+              }
+              
+              // 📋 Apply labels
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: labels
+              });
+              
+              console.log(`🏷️ Applied labels: ${labels.join(', ')}`);
+            } catch (error) {
+              console.log(`⚠️ Failed to apply labels: ${error.message}`);
+              console.log('🛡️ Continuing with workflow execution...');
+            }
+      # 💬 Generate analysis comment
+      - name: 💬 Post Analysis Comment
+        uses: actions/github-script@v7
+        continue-on-error: true  # 🛡️ Continue if commenting fails
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              const prNumber = ${{ steps.pr-analysis.outputs.pr_number }};
+              const sizeEmoji = '${{ steps.pr-analysis.outputs.size_emoji }}';
+              const prSize = '${{ steps.pr-analysis.outputs.pr_size }}';
+              const changedFiles = ${{ steps.pr-analysis.outputs.changed_files }};
+              const additions = ${{ steps.pr-analysis.outputs.additions }};
+              const deletions = ${{ steps.pr-analysis.outputs.deletions }};
+              const primaryType = '${{ steps.pr-analysis.outputs.primary_type }}';
+              
+              // 🎨 Build change summary
+              let changeSummary = [];
+              if (${{ steps.pr-analysis.outputs.has_frontend }} > 0) changeSummary.push('🎨 Frontend');
+              if (${{ steps.pr-analysis.outputs.has_backend }} > 0) changeSummary.push('⚡ Backend');
+              if (${{ steps.pr-analysis.outputs.has_docs }} > 0) changeSummary.push('📚 Documentation');
+              if (${{ steps.pr-analysis.outputs.has_tests }} > 0) changeSummary.push('🧪 Tests');
+              if (${{ steps.pr-analysis.outputs.has_config }} > 0) changeSummary.push('⚙️ Configuration');
+              if (${{ steps.pr-analysis.outputs.has_workflows }} > 0) changeSummary.push('🤖 Workflows');
+              if (${{ steps.pr-analysis.outputs.has_dependencies }} > 0) changeSummary.push('📦 Dependencies');
+              
+              // 💡 Generate recommendations
+              let recommendations = [];
+              
+              if (prSize === 'large') {
+                recommendations.push('🔍 Consider breaking this into smaller PRs for easier review');
+              }
+              if (${{ steps.pr-analysis.outputs.has_tests }} === 0 && (${{ steps.pr-analysis.outputs.has_frontend }} > 0 || ${{ steps.pr-analysis.outputs.has_backend }} > 0)) {
+                recommendations.push('🧪 Consider adding tests for new functionality');
+              }
+              if (${{ steps.pr-analysis.outputs.has_docs }} === 0 && changedFiles > 5) {
+                recommendations.push('📚 Consider updating documentation for these changes');
+              }
+              if (deletions > additions * 2) {
+                recommendations.push('🗑️ Large deletion detected - please confirm this is intentional');
+              }
+              if (${{ steps.pr-analysis.outputs.has_dependencies }} > 0) {
+                recommendations.push('📦 Dependencies changed - please verify security and compatibility');
+              }
+              
+              // 👥 Suggest reviewers based on changes
+              let reviewerSuggestions = [];
+              if (primaryType === 'frontend') {
+                reviewerSuggestions.push('Consider requesting review from frontend team members');
+              }
+              if (primaryType === 'backend') {
+                reviewerSuggestions.push('Consider requesting review from backend team members');
+              }
+              if (primaryType === 'workflow') {
+                reviewerSuggestions.push('Consider requesting review from DevOps/automation team');
+              }
+              if (primaryType === 'documentation') {
+                reviewerSuggestions.push('Consider requesting review from technical writers');
+              }
+              
+              // 📝 Build comment
+              const comment = `## ${sizeEmoji} PR Analysis Report
+              
+              **Size:** ${prSize} (${changedFiles} files, +${additions}/-${deletions} lines)  
+              **Primary Type:** ${primaryType}  
+              **Areas Changed:** ${changeSummary.join(', ') || 'General changes'}
+              
+              ### 📊 Change Breakdown:
+              - 📁 **Files changed:** ${changedFiles}
+              - ➕ **Lines added:** ${additions}
+              - ➖ **Lines removed:** ${deletions}
+              - 🎯 **Net change:** ${additions - deletions} lines
+              
+              ### 🔍 Detected Changes:
+              ${changeSummary.length > 0 ? changeSummary.map(item => `- ${item}`).join('\n') : '- General code changes'}
+              
+              ${recommendations.length > 0 ? `### 💡 Recommendations:
+              ${recommendations.map(rec => `- ${rec}`).join('\n')}` : ''}
+              
+              ${reviewerSuggestions.length > 0 ? `### 👥 Reviewer Suggestions:
+              ${reviewerSuggestions.map(sug => `- ${sug}`).join('\n')}` : ''}
+              
+              ### 📋 Review Checklist:
+              - [ ] Code follows project standards
+              - [ ] Tests are included and passing
+              - [ ] Documentation is updated
+              - [ ] No breaking changes (or properly documented)
+              - [ ] Security considerations reviewed
+              
+              ---
+              
+              > 🤖 **Automated by PR Automation Workflow** | This analysis helps streamline the review process!`;
+              
+              // 📤 Post the comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: comment
+              });
+              
+              console.log('💬 Posted PR analysis comment');
+            } catch (error) {
+              console.log(`⚠️ Failed to post analysis comment: ${error.message}`);
+              console.log('🛡️ Continuing with workflow execution...');
+            }
+      # 🎯 Auto-assign reviewers (optional)
+      - name: 🎯 Auto-assign Reviewers
+        if: steps.pr-analysis.outputs.pr_size != 'large'  # Only auto-assign for smaller PRs
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = ${{ steps.pr-analysis.outputs.pr_number }};
+            const primaryType = '${{ steps.pr-analysis.outputs.primary_type }}';
+            const author = context.payload.pull_request.user.login;
+            
+            // 👥 Define reviewer mapping (customize for your team)
+            const reviewerMap = {
+              'frontend': ['@frontend-team'],
+              'backend': ['@backend-team'],
+              'workflow': ['@devops-team'],
+              'documentation': ['@docs-team'],
+              'testing': ['@qa-team']
+            };
+            
+            // 🎯 Get suggested reviewers (excluding author)
+            let suggestedReviewers = reviewerMap[primaryType] || [];
+            
+            // 📝 Note: This is a demo - in real usage, you'd have actual usernames
+            console.log(`🎯 Would suggest reviewers for ${primaryType}: ${suggestedReviewers.join(', ')}`);
+            console.log(`📋 PR author: ${author}`);
+            console.log('💡 In a real scenario, configure actual team member usernames');
+            
+      # 📈 Track PR metrics
+      - name: 📈 Track PR Metrics
+        run: |
+          echo "📊 PR Metrics Summary:"
+          echo "├── Size: ${{ steps.pr-analysis.outputs.pr_size }} ${{ steps.pr-analysis.outputs.size_emoji }}"
+          echo "├── Files: ${{ steps.pr-analysis.outputs.changed_files }}"
+          echo "├── Additions: +${{ steps.pr-analysis.outputs.additions }}"
+          echo "├── Deletions: -${{ steps.pr-analysis.outputs.deletions }}"
+          echo "├── Primary Type: ${{ steps.pr-analysis.outputs.primary_type }}"
+          echo "└── Author: ${{ github.actor }}"
+          
+          # 💾 Store metrics for weekly stats (could be enhanced to write to file/database)
+          echo "💾 Metrics stored for weekly reporting"

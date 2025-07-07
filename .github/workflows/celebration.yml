@@ -1,0 +1,335 @@
+# 🎉 Celebration Workflow
+#
+# This workflow adds fun and motivation to your development process:
+# - Celebrates successful PR merges with GIFs and congratulatory messages
+# - Provides supportive comments for closed PRs
+# - Tracks merge statistics and team achievements
+# - Creates a positive development culture
+#
+# 🌟 Because every merge deserves a celebration!
+
+name: 🎉 Celebration
+
+# 🚀 Trigger conditions
+on:
+  pull_request:
+    types: [closed]  # 🎯 Triggered when PR is closed (merged or not)
+
+# 🔐 Required permissions for this workflow
+permissions:
+  issues: write        # 💬 Create celebration comments
+  pull-requests: write # 💬 Create celebration comments
+  contents: read       # 📖 Read repository contents
+
+# 🔧 Workflow jobs
+jobs:
+  # 🎉 Celebration Job
+  celebrate:
+    name: 🎊 Celebrate Team Achievement
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 📥 Checkout for access to repo data
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        
+      # 🎯 Analyze the PR closure
+      - name: 🎯 Analyze PR Closure
+        id: pr-analysis
+        run: |
+          # 📋 Extract PR information
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_AUTHOR="${{ github.event.pull_request.user.login }}"
+          WAS_MERGED="${{ github.event.pull_request.merged }}"
+          MERGE_COMMIT="${{ github.event.pull_request.merge_commit_sha }}"
+          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+          HEAD_BRANCH="${{ github.event.pull_request.head.ref }}"
+          
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT
+          echo "pr_author=$PR_AUTHOR" >> $GITHUB_OUTPUT
+          echo "was_merged=$WAS_MERGED" >> $GITHUB_OUTPUT
+          echo "merge_commit=$MERGE_COMMIT" >> $GITHUB_OUTPUT
+          echo "base_branch=$BASE_BRANCH" >> $GITHUB_OUTPUT
+          echo "head_branch=$HEAD_BRANCH" >> $GITHUB_OUTPUT
+          
+          # 🕒 Get current timestamp
+          TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S UTC')
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          
+          # 🎲 Select random celebration elements
+          CELEBRATION_GIFS=(
+            "https://media.giphy.com/media/26u4cqiYI30juCOGY/giphy.gif"
+            "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif"
+            "https://media.giphy.com/media/26tOZ42Mg6pbTUPHW/giphy.gif"
+            "https://media.giphy.com/media/3oz8xAFtqoOUUrsh7W/giphy.gif"
+            "https://media.giphy.com/media/26u4exk4N6K0L1Fzq/giphy.gif"
+          )
+          
+          CELEBRATION_MESSAGES=(
+            "Fantastic work! 🌟"
+            "Amazing contribution! 🚀"
+            "Great job team! 💪"
+            "Outstanding effort! ⭐"
+            "Excellent work! 🎯"
+            "Superb contribution! 🏆"
+            "Brilliant work! 💎"
+            "Awesome job! 🔥"
+          )
+          
+          RANDOM_GIF=${CELEBRATION_GIFS[$RANDOM % ${#CELEBRATION_GIFS[@]}]}
+          RANDOM_MESSAGE=${CELEBRATION_MESSAGES[$RANDOM % ${#CELEBRATION_MESSAGES[@]}]}
+          
+          echo "celebration_gif=$RANDOM_GIF" >> $GITHUB_OUTPUT
+          echo "celebration_message=$RANDOM_MESSAGE" >> $GITHUB_OUTPUT
+          
+          # 🏷️ Determine celebration type based on branch
+          case "$HEAD_BRANCH" in
+            feature/*)
+              echo "celebration_type=feature" >> $GITHUB_OUTPUT
+              echo "celebration_emoji=✨" >> $GITHUB_OUTPUT
+              ;;
+            bugfix/*)
+              echo "celebration_type=bugfix" >> $GITHUB_OUTPUT
+              echo "celebration_emoji=🐛" >> $GITHUB_OUTPUT
+              ;;
+            hotfix/*)
+              echo "celebration_type=hotfix" >> $GITHUB_OUTPUT
+              echo "celebration_emoji=🚨" >> $GITHUB_OUTPUT
+              ;;
+            release/*)
+              echo "celebration_type=release" >> $GITHUB_OUTPUT
+              echo "celebration_emoji=🚀" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "celebration_type=general" >> $GITHUB_OUTPUT
+              echo "celebration_emoji=🎉" >> $GITHUB_OUTPUT
+              ;;
+          esac
+          
+      # 🎊 Celebrate successful merges
+      - name: 🎊 Celebrate Merge Success
+        if: steps.pr-analysis.outputs.was_merged == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = ${{ steps.pr-analysis.outputs.pr_number }};
+            const author = '${{ steps.pr-analysis.outputs.pr_author }}';
+            const celebrationEmoji = '${{ steps.pr-analysis.outputs.celebration_emoji }}';
+            const celebrationType = '${{ steps.pr-analysis.outputs.celebration_type }}';
+            const celebrationMessage = '${{ steps.pr-analysis.outputs.celebration_message }}';
+            const celebrationGif = '${{ steps.pr-analysis.outputs.celebration_gif }}';
+            const baseBranch = '${{ steps.pr-analysis.outputs.base_branch }}';
+            const timestamp = '${{ steps.pr-analysis.outputs.timestamp }}';
+            
+            // 🎨 Generate type-specific celebration messages
+            let typeSpecificMessage = '';
+            switch(celebrationType) {
+              case 'feature':
+                typeSpecificMessage = '🌟 New feature successfully delivered! Your innovation drives us forward!';
+                break;
+              case 'bugfix':
+                typeSpecificMessage = '🔧 Bug squashed! Thanks for keeping our code quality high!';
+                break;
+              case 'hotfix':
+                typeSpecificMessage = '🚑 Critical issue resolved! Your quick action saved the day!';
+                break;
+              case 'release':
+                typeSpecificMessage = '🚀 Release milestone achieved! Ready for launch!';
+                break;
+              default:
+                typeSpecificMessage = '🎯 Great contribution! Every commit makes a difference!';
+            }
+            
+            // 🏆 Generate achievement badges
+            const achievements = [];
+            
+            // Check for special achievements (simplified logic for demo)
+            if (baseBranch === 'main') {
+              achievements.push('🏆 **Main Branch Contributor**');
+            }
+            
+            // Weekly/monthly contributor logic could be added here
+            achievements.push('⭐ **Team Player**');
+            
+            // 🎉 Build celebration comment
+            const celebrationComment = `## ${celebrationEmoji} MERGE CELEBRATION! ${celebrationEmoji}
+            
+            ![Celebration GIF](${celebrationGif})
+            
+            ### 🎊 ${celebrationMessage}
+            
+            **Congratulations @${author}!** Your PR has been successfully merged into \`${baseBranch}\`!
+            
+            ${typeSpecificMessage}
+            
+            ### 🏆 Achievements Unlocked:
+            ${achievements.map(achievement => `- ${achievement}`).join('\n')}
+            
+            ### 📊 Merge Statistics:
+            - 🎯 **PR #${prNumber}** successfully merged
+            - 📅 **Merged on:** ${timestamp}
+            - 🌟 **Target branch:** \`${baseBranch}\`
+            - 👤 **Contributor:** @${author}
+            
+            ### 🚀 What's Next?
+            - ✅ Your changes are now live in \`${baseBranch}\`
+            - 🔍 Monitor for any issues or feedback
+            - 🎯 Keep up the excellent work!
+            
+            ### 🎉 Team Celebration:
+            > "${celebrationMessage} This merge brings us one step closer to our goals. Thank you for your dedication and quality work!" 
+            
+            ---
+            
+            > 🤖 **Automated Celebration** | Because every contribution deserves recognition! 🌟`;
+            
+            // 📤 Post celebration comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: celebrationComment
+            });
+            
+            console.log(`🎉 Posted celebration comment for PR #${prNumber}`);
+            
+      # 💝 Support for closed (non-merged) PRs
+      - name: 💝 Support Non-merged PRs
+        if: steps.pr-analysis.outputs.was_merged == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = ${{ steps.pr-analysis.outputs.pr_number }};
+            const author = '${{ steps.pr-analysis.outputs.pr_author }}';
+            const timestamp = '${{ steps.pr-analysis.outputs.timestamp }}';
+            
+            // 💪 Supportive message for non-merged PRs
+            const supportComment = `## 💪 Thank You for Your Contribution!
+            
+            Hey @${author}! 👋
+            
+            While this PR wasn't merged this time, we want you to know that **every contribution matters** and we truly appreciate your effort! 🙏
+            
+            ### 🌟 What This Means:
+            - Your work and ideas are valuable to the team
+            - This is a normal part of the development process
+            - We encourage you to keep contributing!
+            
+            ### 🚀 Next Steps:
+            - 💬 Check if there's feedback in the PR discussion
+            - 🔄 Consider if any changes could be applied to future work
+            - 🎯 Feel free to open new PRs or contribute to existing ones
+            - 📞 Reach out to the team if you have questions
+            
+            ### 💡 Remember:
+            > "Every expert was once a beginner. Every pro was once an amateur. Every icon was once an unknown." 
+            
+            Your contributions help make our project better, whether they're merged immediately or inspire future improvements. Thank you for being part of our development journey! 🌟
+            
+            ### 📊 Contribution Stats:
+            - 📅 **PR closed on:** ${timestamp}
+            - 👤 **Contributor:** @${author}
+            - 🎯 **Status:** Not merged (but still valuable!)
+            
+            ---
+            
+            > 🤖 **Automated Support Message** | We believe in fostering a positive and encouraging development environment! 💚`;
+            
+            // 📤 Post support comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: supportComment
+            });
+            
+            console.log(`💝 Posted support comment for closed PR #${prNumber}`);
+            
+      # 📊 Track merge statistics
+      - name: 📊 Track Team Statistics
+        run: |
+          echo "📈 Recording team statistics..."
+          
+          # 📋 Basic statistics
+          echo "PR_NUMBER: ${{ steps.pr-analysis.outputs.pr_number }}"
+          echo "PR_AUTHOR: ${{ steps.pr-analysis.outputs.pr_author }}"
+          echo "WAS_MERGED: ${{ steps.pr-analysis.outputs.was_merged }}"
+          echo "CELEBRATION_TYPE: ${{ steps.pr-analysis.outputs.celebration_type }}"
+          echo "TIMESTAMP: ${{ steps.pr-analysis.outputs.timestamp }}"
+          echo "BASE_BRANCH: ${{ steps.pr-analysis.outputs.base_branch }}"
+          
+          # 🏆 In a real scenario, you could:
+          # - Write to a database
+          # - Update a metrics file
+          # - Send to analytics service
+          # - Update team dashboard
+          
+          echo "💾 Statistics recorded for weekly reporting"
+          
+      # 🎁 Special milestone celebrations
+      - name: 🎁 Check for Milestones
+        if: steps.pr-analysis.outputs.was_merged == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = ${{ steps.pr-analysis.outputs.pr_number }};
+            
+            // 🏆 Check for milestone achievements
+            console.log('🔍 Checking for milestone achievements...');
+            
+            // In a real scenario, you could check for:
+            // - 100th PR merged
+            // - User's first merged PR
+            // - Major version releases
+            // - Monthly/quarterly goals
+            
+            // 🎯 Example milestone check
+            if (prNumber % 10 === 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: `## 🎊 MILESTONE ACHIEVEMENT! 🎊
+                
+                🏆 **This is PR #${prNumber}!** 
+                
+                What an amazing milestone for our team! Every 10th PR represents the collective effort and dedication of our contributors. 
+                
+                🌟 **Special recognition to all contributors who made this possible!**
+                
+                Keep up the fantastic work, team! 🚀
+                
+                ---
+                > 🤖 Automated Milestone Celebration`
+              });
+              
+              console.log(`🎊 Celebrated milestone PR #${prNumber}!`);
+            }
+            
+      # 🌟 Daily motivation
+      - name: 🌟 Daily Team Motivation
+        if: steps.pr-analysis.outputs.was_merged == 'true'
+        run: |
+          echo "🌟 Daily Team Motivation"
+          echo "========================"
+          
+          # 💡 Motivational quotes for the team
+          QUOTES=(
+            "Success is not final, failure is not fatal: it is the courage to continue that counts. - Winston Churchill"
+            "The way to get started is to quit talking and begin doing. - Walt Disney"
+            "Innovation distinguishes between a leader and a follower. - Steve Jobs"
+            "Your work is going to fill a large part of your life, so do what you love. - Steve Jobs"
+            "The future belongs to those who believe in the beauty of their dreams. - Eleanor Roosevelt"
+          )
+          
+          RANDOM_QUOTE=${QUOTES[$RANDOM % ${#QUOTES[@]}]}
+          
+          echo "💬 Daily Quote: $RANDOM_QUOTE"
+          echo ""
+          echo "🎯 Remember: Every line of code is a step towards our goals!"
+          echo "🚀 Together, we're building something amazing!"

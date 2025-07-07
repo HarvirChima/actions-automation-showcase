@@ -1,0 +1,343 @@
+# 🌟 Branch Automation Workflow
+# 
+# This workflow demonstrates advanced branch automation capabilities:
+# - Welcomes new branches with personalized messages
+# - Analyzes branch type based on naming conventions
+# - Provides smart suggestions based on branch activity
+# - Creates helpful documentation for contributors
+#
+# 🎯 Perfect for onboarding new contributors and maintaining consistency!
+
+name: 🌟 Branch Automation
+
+# 🚀 Trigger conditions
+on:
+  create:  # 🆕 Triggered when a new branch is created
+  push:    # 📤 Triggered on every push to any branch
+    branches:
+      - '**'  # All branches (feature/*, bugfix/*, hotfix/*, etc.)
+
+# 🔐 Required permissions for this workflow
+permissions:
+  contents: write      # 📝 Push welcome files to repository
+  issues: write        # 🎯 Create tracking issues
+  pull-requests: write # 💬 Comment on PRs if needed
+
+# 🔧 Workflow jobs
+jobs:
+  # 🎯 Branch Analysis Job
+  branch-analysis:
+    name: 🔍 Analyze Branch
+    runs-on: ubuntu-latest
+    
+    # 🛡️ Only run on branch creation or first push
+    if: github.event_name == 'create' || github.event.created
+    
+    steps:
+      # 📥 Checkout the repository
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          # 🔍 Fetch full history for analysis
+          fetch-depth: 0
+          
+      # 🏷️ Extract branch information
+      - name: 🏷️ Extract Branch Info
+        id: branch-info
+        run: |
+          # 📋 Get branch name from the ref
+          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          
+          # 🎯 Determine branch type based on naming convention
+          case $BRANCH_NAME in
+            feature/*)
+              echo "branch_type=feature" >> $GITHUB_OUTPUT
+              echo "emoji=✨" >> $GITHUB_OUTPUT
+              echo "description=Feature Development" >> $GITHUB_OUTPUT
+              ;;
+            bugfix/*)
+              echo "branch_type=bugfix" >> $GITHUB_OUTPUT
+              echo "emoji=🐛" >> $GITHUB_OUTPUT
+              echo "description=Bug Fix" >> $GITHUB_OUTPUT
+              ;;
+            hotfix/*)
+              echo "branch_type=hotfix" >> $GITHUB_OUTPUT
+              echo "emoji=🚨" >> $GITHUB_OUTPUT
+              echo "description=Critical Hotfix" >> $GITHUB_OUTPUT
+              ;;
+            release/*)
+              echo "branch_type=release" >> $GITHUB_OUTPUT
+              echo "emoji=🚀" >> $GITHUB_OUTPUT
+              echo "description=Release Preparation" >> $GITHUB_OUTPUT
+              ;;
+            docs/*)
+              echo "branch_type=docs" >> $GITHUB_OUTPUT
+              echo "emoji=📚" >> $GITHUB_OUTPUT
+              echo "description=Documentation" >> $GITHUB_OUTPUT
+              ;;
+            test/*)
+              echo "branch_type=test" >> $GITHUB_OUTPUT
+              echo "emoji=🧪" >> $GITHUB_OUTPUT
+              echo "description=Testing" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "branch_type=other" >> $GITHUB_OUTPUT
+              echo "emoji=🔧" >> $GITHUB_OUTPUT
+              echo "description=General Development" >> $GITHUB_OUTPUT
+              ;;
+          esac
+          
+          # 👤 Get author information
+          echo "author=${{ github.actor }}" >> $GITHUB_OUTPUT
+          echo "author_name=$(git log -1 --pretty=format:'%an' 2>/dev/null || echo '${{ github.actor }}')" >> $GITHUB_OUTPUT
+          
+      # 🎨 Generate branch welcome content
+      - name: 🎨 Generate Welcome Content
+        id: welcome-content
+        run: |
+          # 📝 Create personalized welcome message
+          cat << 'EOF' > branch-welcome.md
+          # ${{ steps.branch-info.outputs.emoji }} Welcome to Branch: `${{ steps.branch-info.outputs.branch_name }}`
+          
+          **Branch Type:** ${{ steps.branch-info.outputs.description }}  
+          **Created by:** @${{ steps.branch-info.outputs.author }}  
+          **Created on:** $(date '+%Y-%m-%d %H:%M:%S UTC')
+          
+          ## 🎯 Smart Suggestions for ${{ steps.branch-info.outputs.branch_type }} branches:
+          
+          EOF
+          
+          # 💡 Add type-specific suggestions
+          case "${{ steps.branch-info.outputs.branch_type }}" in
+            feature)
+              cat << 'FEATURE_EOF' >> branch-welcome.md
+          ### ✨ Feature Development Best Practices:
+          - [ ] 📋 Create/update issue linking this feature
+          - [ ] 🧪 Write tests for new functionality
+          - [ ] 📚 Update documentation
+          - [ ] 🔍 Consider breaking changes
+          - [ ] 🎨 Follow UI/UX guidelines
+          - [ ] ⚡ Performance considerations
+          
+          ### 🚀 Helpful Commands:
+          ```bash
+          # Run tests
+          npm test
+          
+          # Start development server
+          npm start
+          
+          # Check code style
+          npm run lint
+          ```
+          FEATURE_EOF
+              ;;
+            bugfix)
+              cat << 'BUGFIX_EOF' >> branch-welcome.md
+          ### 🐛 Bug Fix Guidelines:
+          - [ ] 🔍 Reproduce the issue
+          - [ ] 📋 Reference the issue number
+          - [ ] 🧪 Add regression tests
+          - [ ] ✅ Verify fix works
+          - [ ] 📝 Update changelog
+          - [ ] 🔎 Check for similar issues
+          
+          ### 🔧 Debug Commands:
+          ```bash
+          # Run specific tests
+          npm test -- --verbose
+          
+          # Debug mode
+          npm run debug
+          ```
+          BUGFIX_EOF
+              ;;
+            hotfix)
+              cat << 'HOTFIX_EOF' >> branch-welcome.md
+          ### 🚨 Hotfix Priority Actions:
+          - [ ] 🔥 **URGENT**: Verify this is production-critical
+          - [ ] 📞 Notify stakeholders
+          - [ ] 🧪 Test thoroughly
+          - [ ] 📋 Update incident documentation
+          - [ ] 🚀 Plan immediate deployment
+          - [ ] 📊 Monitor post-deployment
+          
+          ### ⚡ Quick Commands:
+          ```bash
+          # Quick test
+          npm run test:quick
+          
+          # Production build test
+          npm run build
+          ```
+          HOTFIX_EOF
+              ;;
+            release)
+              cat << 'RELEASE_EOF' >> branch-welcome.md
+          ### 🚀 Release Preparation Checklist:
+          - [ ] 📋 Update version numbers
+          - [ ] 📝 Update CHANGELOG.md
+          - [ ] 🧪 Run full test suite
+          - [ ] 📚 Update documentation
+          - [ ] 🔍 Security audit
+          - [ ] 📊 Performance benchmarks
+          
+          ### 📦 Release Commands:
+          ```bash
+          # Version bump
+          npm version patch/minor/major
+          
+          # Full test suite
+          npm run test:all
+          
+          # Build production
+          npm run build:prod
+          ```
+          RELEASE_EOF
+              ;;
+            *)
+              cat << 'DEFAULT_EOF' >> branch-welcome.md
+          ### 🔧 General Development Tips:
+          - [ ] 📋 Keep commits focused and atomic
+          - [ ] 🧪 Run tests frequently
+          - [ ] 📝 Write descriptive commit messages
+          - [ ] 🔍 Review your own changes first
+          - [ ] 💬 Ask for help when needed
+          
+          ### 🛠️ Common Commands:
+          ```bash
+          # Install dependencies
+          npm install
+          
+          # Run development server
+          npm start
+          
+          # Run tests
+          npm test
+          ```
+          DEFAULT_EOF
+              ;;
+          esac
+          
+          # 🎉 Add encouraging footer
+          cat << 'FOOTER_EOF' >> branch-welcome.md
+          
+          ## 🎉 Happy Coding!
+          
+          This branch was automatically analyzed by our GitHub Actions workflow.  
+          For questions or help, feel free to reach out to the team! 💪
+          
+          ---
+          
+          > 🤖 **Automated by GitHub Actions** | Branch Automation Workflow v1.0
+          FOOTER_EOF
+          
+      # 💾 Commit the welcome file
+      - name: 💾 Create Branch Welcome File
+        continue-on-error: true  # 🛡️ Continue if commit fails
+        run: |
+          # 📁 Create docs directory if it doesn't exist
+          mkdir -p docs/branches
+          
+          # 📝 Move welcome file to docs
+          mv branch-welcome.md "docs/branches/welcome-${{ steps.branch-info.outputs.branch_name }}.md"
+          
+          # 📤 Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # 📋 Add and commit
+          git add docs/branches/
+          
+          # Check if there are changes to commit
+          if git diff --cached --quiet; then
+            echo "ℹ️ No changes to commit"
+          else
+            git commit -m "${{ steps.branch-info.outputs.emoji }} Welcome ${{ steps.branch-info.outputs.branch_name }} branch
+
+          🤖 Automated branch analysis and welcome message
+          
+          Branch Type: ${{ steps.branch-info.outputs.description }}
+          Created by: @${{ steps.branch-info.outputs.author }}
+          
+          This commit was created by the Branch Automation workflow."
+          
+            # 📤 Push changes (with error handling)
+            if git push; then
+              echo "✅ Welcome file committed and pushed successfully"
+            else
+              echo "⚠️ Failed to push welcome file - this may be due to branch protection rules"
+            fi
+          fi
+          
+      # 📊 Branch activity analysis
+      - name: 📊 Analyze Branch Activity
+        run: |
+          echo "🔍 Analyzing branch activity patterns..."
+          
+          # 📈 Basic statistics
+          COMMIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+          echo "📋 Total commits: $COMMIT_COUNT"
+          
+          # 📝 Recent activity
+          if [ "$COMMIT_COUNT" -gt "0" ]; then
+            echo "📅 Recent commits:"
+            git log --oneline -n 5
+          fi
+          
+          # 💡 Generate insights
+          echo "💡 Branch Insights:"
+          echo "- This is a ${{ steps.branch-info.outputs.description }} branch"
+          echo "- Created by @${{ steps.branch-info.outputs.author }}"
+          echo "- Total commits: $COMMIT_COUNT"
+          
+      # 🎯 Create issue for tracking (optional)
+      - name: 🎯 Create Tracking Issue
+        if: steps.branch-info.outputs.branch_type == 'feature' || steps.branch-info.outputs.branch_type == 'bugfix'
+        uses: actions/github-script@v7
+        continue-on-error: true  # 🛡️ Continue if issue creation fails
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              const branchName = "${{ steps.branch-info.outputs.branch_name }}";
+              const branchType = "${{ steps.branch-info.outputs.branch_type }}";
+              const emoji = "${{ steps.branch-info.outputs.emoji }}";
+              const author = "${{ steps.branch-info.outputs.author }}";
+              
+              // 📋 Create issue for tracking
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `${emoji} Track ${branchType}: ${branchName}`,
+                body: `## ${emoji} Branch Tracking Issue
+                
+                **Branch:** \`${branchName}\`  
+                **Type:** ${branchType}  
+                **Author:** @${author}  
+                **Created:** ${new Date().toISOString()}
+                
+                ### 📋 Progress Checklist:
+                - [ ] Initial development
+                - [ ] Testing completed
+                - [ ] Documentation updated
+                - [ ] Code review requested
+                - [ ] Ready for merge
+                
+                ### 🔗 Related Links:
+                - Branch: [${branchName}](../../tree/${branchName})
+                - Welcome Guide: [docs/branches/welcome-${branchName}.md](../../blob/${branchName}/docs/branches/welcome-${branchName}.md)
+                
+                ---
+                
+                > 🤖 This issue was automatically created by the Branch Automation workflow.`,
+                labels: ['automation', branchType, 'tracking'],
+                assignees: [author]
+              });
+              
+              console.log(`📋 Created tracking issue #${issue.data.number}`);
+            } catch (error) {
+              console.log(`⚠️ Failed to create tracking issue: ${error.message}`);
+              console.log('🛡️ Continuing with workflow execution...');
+            }
