@@ -1,0 +1,28 @@
+{
+  "name": "actions-automation-showcase",
+  "version": "1.0.0",
+  "description": "🚀 Advanced GitHub Actions showcase with branch automations, smart labeling, and workflow demonstrations",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Running tests...\" && node test.js",
+    "lint": "echo \"Linting code...\" && echo \"✅ All good!\"",
+    "build": "echo \"Building project...\" && echo \"🎉 Build complete!\""
+  },
+  "keywords": [
+    "github-actions",
+    "automation",
+    "ci-cd",
+    "workflow",
+    "demo",
+    "showcase"
+  ],
+  "author": "GitHub Actions Demo",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  }
+}
