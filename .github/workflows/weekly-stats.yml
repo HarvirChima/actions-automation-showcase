@@ -29,6 +29,11 @@ on:
         default: true
         type: boolean
 
+# 🔐 Required permissions for this workflow
+permissions:
+  contents: read  # 📖 Read repository contents and history
+  issues: write   # 📊 Create weekly report issues
+
 # 🔧 Workflow jobs
 jobs:
   # 📈 Generate Weekly Report

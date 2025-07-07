@@ -15,6 +15,12 @@ on:
   pull_request:
     types: [closed]  # 🎯 Triggered when PR is closed (merged or not)
 
+# 🔐 Required permissions for this workflow
+permissions:
+  issues: write        # 💬 Create celebration comments
+  pull-requests: write # 💬 Create celebration comments
+  contents: read       # 📖 Read repository contents
+
 # 🔧 Workflow jobs
 jobs:
   # 🎉 Celebration Job

@@ -17,6 +17,12 @@ on:
     branches:
       - '**'  # All branches (feature/*, bugfix/*, hotfix/*, etc.)
 
+# 🔐 Required permissions for this workflow
+permissions:
+  contents: write      # 📝 Push welcome files to repository
+  issues: write        # 🎯 Create tracking issues
+  pull-requests: write # 💬 Comment on PRs if needed
+
 # 🔧 Workflow jobs
 jobs:
   # 🎯 Branch Analysis Job
@@ -229,6 +235,7 @@ jobs:
           
       # 💾 Commit the welcome file
       - name: 💾 Create Branch Welcome File
+        continue-on-error: true  # 🛡️ Continue if commit fails
         run: |
           # 📁 Create docs directory if it doesn't exist
           mkdir -p docs/branches
@@ -242,7 +249,12 @@ jobs:
           
           # 📋 Add and commit
           git add docs/branches/
-          git commit -m "${{ steps.branch-info.outputs.emoji }} Welcome ${{ steps.branch-info.outputs.branch_name }} branch
+          
+          # Check if there are changes to commit
+          if git diff --cached --quiet; then
+            echo "ℹ️ No changes to commit"
+          else
+            git commit -m "${{ steps.branch-info.outputs.emoji }} Welcome ${{ steps.branch-info.outputs.branch_name }} branch
 
           🤖 Automated branch analysis and welcome message
           
@@ -251,8 +263,13 @@ jobs:
           
           This commit was created by the Branch Automation workflow."
           
-          # 📤 Push changes
-          git push
+            # 📤 Push changes (with error handling)
+            if git push; then
+              echo "✅ Welcome file committed and pushed successfully"
+            else
+              echo "⚠️ Failed to push welcome file - this may be due to branch protection rules"
+            fi
+          fi
           
       # 📊 Branch activity analysis
       - name: 📊 Analyze Branch Activity
@@ -279,42 +296,48 @@ jobs:
       - name: 🎯 Create Tracking Issue
         if: steps.branch-info.outputs.branch_type == 'feature' || steps.branch-info.outputs.branch_type == 'bugfix'
         uses: actions/github-script@v7
+        continue-on-error: true  # 🛡️ Continue if issue creation fails
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const branchName = "${{ steps.branch-info.outputs.branch_name }}";
-            const branchType = "${{ steps.branch-info.outputs.branch_type }}";
-            const emoji = "${{ steps.branch-info.outputs.emoji }}";
-            const author = "${{ steps.branch-info.outputs.author }}";
-            
-            // 📋 Create issue for tracking
-            const issue = await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `${emoji} Track ${branchType}: ${branchName}`,
-              body: `## ${emoji} Branch Tracking Issue
+            try {
+              const branchName = "${{ steps.branch-info.outputs.branch_name }}";
+              const branchType = "${{ steps.branch-info.outputs.branch_type }}";
+              const emoji = "${{ steps.branch-info.outputs.emoji }}";
+              const author = "${{ steps.branch-info.outputs.author }}";
               
-              **Branch:** \`${branchName}\`  
-              **Type:** ${branchType}  
-              **Author:** @${author}  
-              **Created:** ${new Date().toISOString()}
+              // 📋 Create issue for tracking
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `${emoji} Track ${branchType}: ${branchName}`,
+                body: `## ${emoji} Branch Tracking Issue
+                
+                **Branch:** \`${branchName}\`  
+                **Type:** ${branchType}  
+                **Author:** @${author}  
+                **Created:** ${new Date().toISOString()}
+                
+                ### 📋 Progress Checklist:
+                - [ ] Initial development
+                - [ ] Testing completed
+                - [ ] Documentation updated
+                - [ ] Code review requested
+                - [ ] Ready for merge
+                
+                ### 🔗 Related Links:
+                - Branch: [${branchName}](../../tree/${branchName})
+                - Welcome Guide: [docs/branches/welcome-${branchName}.md](../../blob/${branchName}/docs/branches/welcome-${branchName}.md)
+                
+                ---
+                
+                > 🤖 This issue was automatically created by the Branch Automation workflow.`,
+                labels: ['automation', branchType, 'tracking'],
+                assignees: [author]
+              });
               
-              ### 📋 Progress Checklist:
-              - [ ] Initial development
-              - [ ] Testing completed
-              - [ ] Documentation updated
-              - [ ] Code review requested
-              - [ ] Ready for merge
-              
-              ### 🔗 Related Links:
-              - Branch: [${branchName}](../../tree/${branchName})
-              - Welcome Guide: [docs/branches/welcome-${branchName}.md](../../blob/${branchName}/docs/branches/welcome-${branchName}.md)
-              
-              ---
-              
-              > 🤖 This issue was automatically created by the Branch Automation workflow.`,
-              labels: ['automation', branchType, 'tracking'],
-              assignees: [author]
-            });
-            
-            console.log(`📋 Created tracking issue #${issue.data.number}`);
+              console.log(`📋 Created tracking issue #${issue.data.number}`);
+            } catch (error) {
+              console.log(`⚠️ Failed to create tracking issue: ${error.message}`);
+              console.log('🛡️ Continuing with workflow execution...');
+            }

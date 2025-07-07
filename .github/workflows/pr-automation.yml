@@ -17,6 +17,12 @@ on:
     types: [opened, edited, synchronize, reopened]
     branches: ['main', 'develop']
 
+# 🔐 Required permissions for this workflow
+permissions:
+  issues: write        # 🏷️ Add labels and create comments
+  pull-requests: write # 🏷️ Add labels and create comments
+  contents: read       # 📖 Read repository contents
+
 # 🔧 Workflow jobs
 jobs:
   # 🏷️ PR Analysis and Labeling Job
@@ -116,167 +122,177 @@ jobs:
       # 🏷️ Auto-label the PR
       - name: 🏷️ Apply Auto Labels
         uses: actions/github-script@v7
+        continue-on-error: true  # 🛡️ Continue if labeling fails
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const prNumber = ${{ steps.pr-analysis.outputs.pr_number }};
-            const labels = [];
-            
-            // 📏 Size label
-            const sizeLabel = `size/${{ steps.pr-analysis.outputs.pr_size }}`;
-            labels.push(sizeLabel);
-            
-            // 🎯 Type-based labels
-            if (${{ steps.pr-analysis.outputs.has_docs }} > 0) {
-              labels.push('📚 documentation');
+            try {
+              const prNumber = ${{ steps.pr-analysis.outputs.pr_number }};
+              const labels = [];
+              
+              // 📏 Size label
+              const sizeLabel = `size/${{ steps.pr-analysis.outputs.pr_size }}`;
+              labels.push(sizeLabel);
+              
+              // 🎯 Type-based labels
+              if (${{ steps.pr-analysis.outputs.has_docs }} > 0) {
+                labels.push('📚 documentation');
+              }
+              if (${{ steps.pr-analysis.outputs.has_tests }} > 0) {
+                labels.push('🧪 testing');
+              }
+              if (${{ steps.pr-analysis.outputs.has_config }} > 0) {
+                labels.push('⚙️ configuration');
+              }
+              if (${{ steps.pr-analysis.outputs.has_frontend }} > 0) {
+                labels.push('🎨 frontend');
+              }
+              if (${{ steps.pr-analysis.outputs.has_backend }} > 0) {
+                labels.push('⚡ backend');
+              }
+              if (${{ steps.pr-analysis.outputs.has_workflows }} > 0) {
+                labels.push('🤖 workflow');
+              }
+              if (${{ steps.pr-analysis.outputs.has_dependencies }} > 0) {
+                labels.push('📦 dependencies');
+              }
+              
+              // 🚨 Special attention labels
+              if (${{ steps.pr-analysis.outputs.changed_files }} > 20) {
+                labels.push('🔍 needs-careful-review');
+              }
+              if (${{ steps.pr-analysis.outputs.additions }} > 500) {
+                labels.push('📈 large-addition');
+              }
+              if (${{ steps.pr-analysis.outputs.deletions }} > 100) {
+                labels.push('🗑️ large-deletion');
+              }
+              
+              // 🎯 Primary type label
+              const primaryType = '${{ steps.pr-analysis.outputs.primary_type }}';
+              if (primaryType !== 'general') {
+                labels.push(`type:${primaryType}`);
+              }
+              
+              // 📋 Apply labels
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: labels
+              });
+              
+              console.log(`🏷️ Applied labels: ${labels.join(', ')}`);
+            } catch (error) {
+              console.log(`⚠️ Failed to apply labels: ${error.message}`);
+              console.log('🛡️ Continuing with workflow execution...');
             }
-            if (${{ steps.pr-analysis.outputs.has_tests }} > 0) {
-              labels.push('🧪 testing');
-            }
-            if (${{ steps.pr-analysis.outputs.has_config }} > 0) {
-              labels.push('⚙️ configuration');
-            }
-            if (${{ steps.pr-analysis.outputs.has_frontend }} > 0) {
-              labels.push('🎨 frontend');
-            }
-            if (${{ steps.pr-analysis.outputs.has_backend }} > 0) {
-              labels.push('⚡ backend');
-            }
-            if (${{ steps.pr-analysis.outputs.has_workflows }} > 0) {
-              labels.push('🤖 workflow');
-            }
-            if (${{ steps.pr-analysis.outputs.has_dependencies }} > 0) {
-              labels.push('📦 dependencies');
-            }
-            
-            // 🚨 Special attention labels
-            if (${{ steps.pr-analysis.outputs.changed_files }} > 20) {
-              labels.push('🔍 needs-careful-review');
-            }
-            if (${{ steps.pr-analysis.outputs.additions }} > 500) {
-              labels.push('📈 large-addition');
-            }
-            if (${{ steps.pr-analysis.outputs.deletions }} > 100) {
-              labels.push('🗑️ large-deletion');
-            }
-            
-            // 🎯 Primary type label
-            const primaryType = '${{ steps.pr-analysis.outputs.primary_type }}';
-            if (primaryType !== 'general') {
-              labels.push(`type:${primaryType}`);
-            }
-            
-            // 📋 Apply labels
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              labels: labels
-            });
-            
-            console.log(`🏷️ Applied labels: ${labels.join(', ')}`);
-            
       # 💬 Generate analysis comment
       - name: 💬 Post Analysis Comment
         uses: actions/github-script@v7
+        continue-on-error: true  # 🛡️ Continue if commenting fails
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const prNumber = ${{ steps.pr-analysis.outputs.pr_number }};
-            const sizeEmoji = '${{ steps.pr-analysis.outputs.size_emoji }}';
-            const prSize = '${{ steps.pr-analysis.outputs.pr_size }}';
-            const changedFiles = ${{ steps.pr-analysis.outputs.changed_files }};
-            const additions = ${{ steps.pr-analysis.outputs.additions }};
-            const deletions = ${{ steps.pr-analysis.outputs.deletions }};
-            const primaryType = '${{ steps.pr-analysis.outputs.primary_type }}';
-            
-            // 🎨 Build change summary
-            let changeSummary = [];
-            if (${{ steps.pr-analysis.outputs.has_frontend }} > 0) changeSummary.push('🎨 Frontend');
-            if (${{ steps.pr-analysis.outputs.has_backend }} > 0) changeSummary.push('⚡ Backend');
-            if (${{ steps.pr-analysis.outputs.has_docs }} > 0) changeSummary.push('📚 Documentation');
-            if (${{ steps.pr-analysis.outputs.has_tests }} > 0) changeSummary.push('🧪 Tests');
-            if (${{ steps.pr-analysis.outputs.has_config }} > 0) changeSummary.push('⚙️ Configuration');
-            if (${{ steps.pr-analysis.outputs.has_workflows }} > 0) changeSummary.push('🤖 Workflows');
-            if (${{ steps.pr-analysis.outputs.has_dependencies }} > 0) changeSummary.push('📦 Dependencies');
-            
-            // 💡 Generate recommendations
-            let recommendations = [];
-            
-            if (prSize === 'large') {
-              recommendations.push('🔍 Consider breaking this into smaller PRs for easier review');
+            try {
+              const prNumber = ${{ steps.pr-analysis.outputs.pr_number }};
+              const sizeEmoji = '${{ steps.pr-analysis.outputs.size_emoji }}';
+              const prSize = '${{ steps.pr-analysis.outputs.pr_size }}';
+              const changedFiles = ${{ steps.pr-analysis.outputs.changed_files }};
+              const additions = ${{ steps.pr-analysis.outputs.additions }};
+              const deletions = ${{ steps.pr-analysis.outputs.deletions }};
+              const primaryType = '${{ steps.pr-analysis.outputs.primary_type }}';
+              
+              // 🎨 Build change summary
+              let changeSummary = [];
+              if (${{ steps.pr-analysis.outputs.has_frontend }} > 0) changeSummary.push('🎨 Frontend');
+              if (${{ steps.pr-analysis.outputs.has_backend }} > 0) changeSummary.push('⚡ Backend');
+              if (${{ steps.pr-analysis.outputs.has_docs }} > 0) changeSummary.push('📚 Documentation');
+              if (${{ steps.pr-analysis.outputs.has_tests }} > 0) changeSummary.push('🧪 Tests');
+              if (${{ steps.pr-analysis.outputs.has_config }} > 0) changeSummary.push('⚙️ Configuration');
+              if (${{ steps.pr-analysis.outputs.has_workflows }} > 0) changeSummary.push('🤖 Workflows');
+              if (${{ steps.pr-analysis.outputs.has_dependencies }} > 0) changeSummary.push('📦 Dependencies');
+              
+              // 💡 Generate recommendations
+              let recommendations = [];
+              
+              if (prSize === 'large') {
+                recommendations.push('🔍 Consider breaking this into smaller PRs for easier review');
+              }
+              if (${{ steps.pr-analysis.outputs.has_tests }} === 0 && (${{ steps.pr-analysis.outputs.has_frontend }} > 0 || ${{ steps.pr-analysis.outputs.has_backend }} > 0)) {
+                recommendations.push('🧪 Consider adding tests for new functionality');
+              }
+              if (${{ steps.pr-analysis.outputs.has_docs }} === 0 && changedFiles > 5) {
+                recommendations.push('📚 Consider updating documentation for these changes');
+              }
+              if (deletions > additions * 2) {
+                recommendations.push('🗑️ Large deletion detected - please confirm this is intentional');
+              }
+              if (${{ steps.pr-analysis.outputs.has_dependencies }} > 0) {
+                recommendations.push('📦 Dependencies changed - please verify security and compatibility');
+              }
+              
+              // 👥 Suggest reviewers based on changes
+              let reviewerSuggestions = [];
+              if (primaryType === 'frontend') {
+                reviewerSuggestions.push('Consider requesting review from frontend team members');
+              }
+              if (primaryType === 'backend') {
+                reviewerSuggestions.push('Consider requesting review from backend team members');
+              }
+              if (primaryType === 'workflow') {
+                reviewerSuggestions.push('Consider requesting review from DevOps/automation team');
+              }
+              if (primaryType === 'documentation') {
+                reviewerSuggestions.push('Consider requesting review from technical writers');
+              }
+              
+              // 📝 Build comment
+              const comment = `## ${sizeEmoji} PR Analysis Report
+              
+              **Size:** ${prSize} (${changedFiles} files, +${additions}/-${deletions} lines)  
+              **Primary Type:** ${primaryType}  
+              **Areas Changed:** ${changeSummary.join(', ') || 'General changes'}
+              
+              ### 📊 Change Breakdown:
+              - 📁 **Files changed:** ${changedFiles}
+              - ➕ **Lines added:** ${additions}
+              - ➖ **Lines removed:** ${deletions}
+              - 🎯 **Net change:** ${additions - deletions} lines
+              
+              ### 🔍 Detected Changes:
+              ${changeSummary.length > 0 ? changeSummary.map(item => `- ${item}`).join('\n') : '- General code changes'}
+              
+              ${recommendations.length > 0 ? `### 💡 Recommendations:
+              ${recommendations.map(rec => `- ${rec}`).join('\n')}` : ''}
+              
+              ${reviewerSuggestions.length > 0 ? `### 👥 Reviewer Suggestions:
+              ${reviewerSuggestions.map(sug => `- ${sug}`).join('\n')}` : ''}
+              
+              ### 📋 Review Checklist:
+              - [ ] Code follows project standards
+              - [ ] Tests are included and passing
+              - [ ] Documentation is updated
+              - [ ] No breaking changes (or properly documented)
+              - [ ] Security considerations reviewed
+              
+              ---
+              
+              > 🤖 **Automated by PR Automation Workflow** | This analysis helps streamline the review process!`;
+              
+              // 📤 Post the comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: comment
+              });
+              
+              console.log('💬 Posted PR analysis comment');
+            } catch (error) {
+              console.log(`⚠️ Failed to post analysis comment: ${error.message}`);
+              console.log('🛡️ Continuing with workflow execution...');
             }
-            if (${{ steps.pr-analysis.outputs.has_tests }} === 0 && (${{ steps.pr-analysis.outputs.has_frontend }} > 0 || ${{ steps.pr-analysis.outputs.has_backend }} > 0)) {
-              recommendations.push('🧪 Consider adding tests for new functionality');
-            }
-            if (${{ steps.pr-analysis.outputs.has_docs }} === 0 && changedFiles > 5) {
-              recommendations.push('📚 Consider updating documentation for these changes');
-            }
-            if (deletions > additions * 2) {
-              recommendations.push('🗑️ Large deletion detected - please confirm this is intentional');
-            }
-            if (${{ steps.pr-analysis.outputs.has_dependencies }} > 0) {
-              recommendations.push('📦 Dependencies changed - please verify security and compatibility');
-            }
-            
-            // 👥 Suggest reviewers based on changes
-            let reviewerSuggestions = [];
-            if (primaryType === 'frontend') {
-              reviewerSuggestions.push('Consider requesting review from frontend team members');
-            }
-            if (primaryType === 'backend') {
-              reviewerSuggestions.push('Consider requesting review from backend team members');
-            }
-            if (primaryType === 'workflow') {
-              reviewerSuggestions.push('Consider requesting review from DevOps/automation team');
-            }
-            if (primaryType === 'documentation') {
-              reviewerSuggestions.push('Consider requesting review from technical writers');
-            }
-            
-            // 📝 Build comment
-            const comment = `## ${sizeEmoji} PR Analysis Report
-            
-            **Size:** ${prSize} (${changedFiles} files, +${additions}/-${deletions} lines)  
-            **Primary Type:** ${primaryType}  
-            **Areas Changed:** ${changeSummary.join(', ') || 'General changes'}
-            
-            ### 📊 Change Breakdown:
-            - 📁 **Files changed:** ${changedFiles}
-            - ➕ **Lines added:** ${additions}
-            - ➖ **Lines removed:** ${deletions}
-            - 🎯 **Net change:** ${additions - deletions} lines
-            
-            ### 🔍 Detected Changes:
-            ${changeSummary.length > 0 ? changeSummary.map(item => `- ${item}`).join('\n') : '- General code changes'}
-            
-            ${recommendations.length > 0 ? `### 💡 Recommendations:
-            ${recommendations.map(rec => `- ${rec}`).join('\n')}` : ''}
-            
-            ${reviewerSuggestions.length > 0 ? `### 👥 Reviewer Suggestions:
-            ${reviewerSuggestions.map(sug => `- ${sug}`).join('\n')}` : ''}
-            
-            ### 📋 Review Checklist:
-            - [ ] Code follows project standards
-            - [ ] Tests are included and passing
-            - [ ] Documentation is updated
-            - [ ] No breaking changes (or properly documented)
-            - [ ] Security considerations reviewed
-            
-            ---
-            
-            > 🤖 **Automated by PR Automation Workflow** | This analysis helps streamline the review process!`;
-            
-            // 📤 Post the comment
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              body: comment
-            });
-            
-            console.log('💬 Posted PR analysis comment');
-            
       # 🎯 Auto-assign reviewers (optional)
       - name: 🎯 Auto-assign Reviewers
         if: steps.pr-analysis.outputs.pr_size != 'large'  # Only auto-assign for smaller PRs
