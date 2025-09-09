@@ -1,0 +1,303 @@
+---
+# 🚀 Azure Deployment Workflow
+# Deploys Node.js application to Azure App Service
+
+name: 🚀 Deploy to Azure
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+    branches: [main]
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      force_deploy:
+        description: 'Force deployment even if no changes'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  actions: read
+
+env:
+  NODE_VERSION: '20'
+  AZURE_WEBAPP_PACKAGE_PATH: './dist'
+
+jobs:
+  # 🔍 Pre-deployment checks
+  pre-deploy:
+    name: 🔍 Pre-deployment Checks
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_environment: ${{ steps.env.outputs.deploy_environment }}
+      webapp_name: ${{ steps.env.outputs.webapp_name }}
+      should_deploy: ${{ steps.changes.outputs.should_deploy }}
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: 🌍 Determine Deployment Environment
+        id: env
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            ENVIRONMENT="production"
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            ENVIRONMENT="staging"
+          else
+            ENVIRONMENT="staging"
+          fi
+          
+          echo "deploy_environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          
+          if [[ "$ENVIRONMENT" == "production" ]]; then
+            echo "webapp_name=actions-showcase-prod" >> $GITHUB_OUTPUT
+          else
+            echo "webapp_name=actions-showcase-staging" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🔍 Check Deployment Requirements
+        id: changes
+        run: |
+          if [[ "${{ github.event.inputs.force_deploy }}" == "true" ]]; then
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+            echo "🔄 Force deployment requested"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+            echo "🎮 Manual deployment triggered"
+          elif git diff --name-only HEAD~1 HEAD | \
+               grep -E '\.(js|json|yml|yaml)$' > /dev/null; then
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+            echo "✅ Application files changed - deployment required"
+          else
+            echo "should_deploy=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No significant changes - skipping deployment"
+          fi
+
+  # 🏗️ Build Application
+  build:
+    name: 🏗️ Build Application
+    runs-on: ubuntu-latest
+    needs: pre-deploy
+    if: needs.pre-deploy.outputs.should_deploy == 'true'
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Install Dependencies
+        run: |
+          echo "📦 Installing dependencies..."
+          npm ci --only=production
+          echo "✅ Production dependencies installed"
+
+      - name: 🔍 Security Audit
+        run: |
+          echo "🔍 Running security audit..."
+          npm audit --audit-level=moderate --only=prod || true
+          echo "✅ Security audit completed"
+
+      - name: 🏗️ Build Application
+        run: |
+          echo "🏗️ Building application for Azure deployment..."
+          
+          mkdir -p ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+          
+          cp package*.json ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}/
+          cp index.js ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}/
+          cp -r node_modules/ ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}/
+          
+          # Create web.config for Azure App Service
+          cat > ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}/web.config << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <system.webServer>
+              <handlers>
+                <add name="iisnode" path="index.js" verb="*" modules="iisnode"/>
+              </handlers>
+              <rewrite>
+                <rules>
+                  <rule name="StaticContent">
+                    <action type="Rewrite" url="public{REQUEST_URI}"/>
+                  </rule>
+                  <rule name="DynamicContent">
+                    <conditions>
+                      <add input="{REQUEST_FILENAME}" matchType="IsFile" 
+                           negate="True"/>
+                    </conditions>
+                    <action type="Rewrite" url="index.js"/>
+                  </rule>
+                </rules>
+              </rewrite>
+              <security>
+                <requestFiltering>
+                  <hiddenSegments>
+                    <remove segment="bin"/>
+                  </hiddenSegments>
+                </requestFiltering>
+              </security>
+              <httpErrors existingResponse="PassThrough" />
+            </system.webServer>
+          </configuration>
+          EOF
+          
+          echo "✅ Application built successfully"
+
+      - name: 📤 Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: azure-webapp-package
+          path: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+          retention-days: 30
+
+  # 🚀 Deploy to Azure
+  deploy:
+    name: 🚀 Deploy to Azure (${{ needs.pre-deploy.outputs.deploy_environment }})
+    runs-on: ubuntu-latest
+    needs: [pre-deploy, build]
+    environment:
+      name: azure-${{ needs.pre-deploy.outputs.deploy_environment }}
+      url: https://${{ needs.pre-deploy.outputs.webapp_name }}.azurewebsites.net
+
+    steps:
+      - name: 📥 Download Build Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: azure-webapp-package
+          path: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+
+      - name: 🔐 Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: 🚀 Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ needs.pre-deploy.outputs.webapp_name }}
+          package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+
+      - name: 🔍 Health Check
+        run: |
+          WEBAPP_URL="https://${{ needs.pre-deploy.outputs.webapp_name }}.azurewebsites.net"
+          echo "🔍 Running health checks for $WEBAPP_URL..."
+          
+          echo "⏳ Waiting for deployment to propagate..."
+          sleep 30
+          
+          for i in {1..5}; do
+            echo "🩺 Health check attempt $i/5..."
+            
+            if curl -f -s "$WEBAPP_URL/health" > /dev/null; then
+              echo "✅ Health check passed!"
+              curl -s "$WEBAPP_URL/health" | jq '.' || \
+                echo "Health endpoint responded successfully"
+              echo "🌐 Application URL: $WEBAPP_URL"
+              break
+            else
+              echo "⚠️ Health check failed, retrying in 10 seconds..."
+              sleep 10
+            fi
+            
+            if [[ $i -eq 5 ]]; then
+              echo "❌ Health checks failed after 5 attempts"
+              echo "🔍 This might be normal for first deployment or cold start"
+              echo "🌐 Application URL: $WEBAPP_URL"
+            fi
+          done
+
+      - name: 📊 Deployment Summary
+        run: |
+          echo "📊 Azure Deployment Summary"
+          echo "=========================="
+          echo "🎯 Environment: ${{ needs.pre-deploy.outputs.deploy_environment }}"
+          echo "🏷️ App Service: ${{ needs.pre-deploy.outputs.webapp_name }}"
+          echo "🌐 URL: https://${{ needs.pre-deploy.outputs.webapp_name }}.azurewebsites.net"
+          echo "📍 Commit: ${{ github.sha }}"
+          echo "🌿 Branch: ${{ github.ref_name }}"
+          echo "👤 Deployed by: ${{ github.actor }}"
+          echo "🕒 Deployment time: $(date)"
+          echo "✅ Status: Deployed successfully"
+
+  # 📊 Deployment Notification
+  notify:
+    name: 📊 Deployment Notification
+    runs-on: ubuntu-latest
+    needs: [pre-deploy, build, deploy]
+    if: always() && needs.pre-deploy.outputs.should_deploy == 'true'
+
+    steps:
+      - name: 💬 PR Deployment Comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const deployResult = '${{ needs.deploy.result }}';
+            const environment = '${{ needs.pre-deploy.outputs.deploy_environment }}';
+            const webappName = '${{ needs.pre-deploy.outputs.webapp_name }}';
+            const appUrl = `https://${webappName}.azurewebsites.net`;
+            
+            const emoji = deployResult === 'success' ? '🚀' : '❌';
+            const status = deployResult === 'success' 
+              ? 'Successfully deployed' 
+              : 'Deployment failed';
+            
+            const comment = `## ${emoji} Azure Deployment ${deployResult === 'success' ? 'Complete' : 'Failed'}
+            
+            **Status:** ${status} to **${environment}**
+            
+            ### 🔗 Deployment Details:
+            - **Environment**: \`${environment}\`
+            - **App Service**: \`${webappName}\`
+            - **URL**: [${appUrl}](${appUrl})
+            - **Commit**: \`${{ github.sha }}\`
+            
+            ${deployResult === 'success' ? `
+            ### 🧪 Test your deployment:
+            - 🏠 [Home Page](${appUrl})
+            - 🩺 [Health Check](${appUrl}/health)
+            - 📊 [App Stats](${appUrl}/stats)
+            ` : `
+            ### 🔍 Troubleshooting:
+            - Check the [workflow logs](../../actions) for detailed error information
+            - Verify Azure credentials and permissions
+            - Ensure the App Service exists and is properly configured
+            `}
+            
+            ---
+            
+            > 🤖 **Azure Deployment Bot** | View details in the [Actions tab](../../actions)`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: comment
+            });
