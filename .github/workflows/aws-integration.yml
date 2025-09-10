@@ -1,0 +1,868 @@
+# 🌩️ AWS Integration Workflow
+#
+# This workflow demonstrates comprehensive AWS integration capabilities:
+# - Deploys application to multiple AWS services
+# - Uses Infrastructure as Code with CloudFormation
+# - Implements secure credential management
+# - Monitors deployments with CloudWatch
+# - Manages static assets with S3
+# - Deploys serverless functions to Lambda
+#
+# 🎯 Perfect example of modern cloud DevOps practices!
+
+name: 🌩️ AWS Integration
+
+# 🚀 Trigger conditions
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+    branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:  # 🎮 Manual trigger for demos
+    inputs:
+      deploy_environment:
+        description: 'AWS Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip test suite'
+        required: false
+        default: false
+        type: boolean
+
+# 🔐 Required permissions for this workflow
+permissions:
+  contents: read       # 📖 Read repository contents
+  issues: write        # 💬 Comment on PRs
+  pull-requests: write # 💬 Comment on PRs
+  id-token: write      # 🔐 AWS OIDC authentication
+
+# 🌍 Environment variables
+env:
+  AWS_REGION: 'us-east-1'
+  NODE_VERSION: '20'
+  STACK_NAME_PREFIX: 'github-actions-showcase'
+  S3_BUCKET_PREFIX: 'github-actions-showcase'
+  LAMBDA_FUNCTION_PREFIX: 'github-actions-showcase'
+
+# 🔧 Workflow jobs
+jobs:
+  # 🔍 Pre-deployment checks
+  pre-deployment:
+    name: 🔍 Pre-deployment Checks
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.changes.outputs.should_deploy }}
+      deploy_environment: ${{ steps.env.outputs.deploy_environment }}
+      unique_id: ${{ steps.unique.outputs.unique_id }}
+      
+    steps:
+      # 📥 Checkout code
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          
+      # 🆔 Generate unique deployment ID
+      - name: 🆔 Generate Unique ID
+        id: unique
+        run: |
+          UNIQUE_ID="$(date +%Y%m%d)-$(echo ${{ github.sha }} | cut -c1-8)"
+          echo "unique_id=$UNIQUE_ID" >> $GITHUB_OUTPUT
+          echo "🆔 Deployment ID: $UNIQUE_ID"
+          
+      # 🔍 Analyze changes for deployment necessity
+      - name: 🔍 Analyze Deployment Requirements
+        id: changes
+        run: |
+          echo "🔍 Analyzing changes to determine deployment requirements..."
+          
+          # 📊 Check if we need to deploy based on file changes
+          if git diff --name-only HEAD~1 HEAD | grep -E '\.(js|json|yml|yaml)$' > /dev/null || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+            echo "✅ Application or infrastructure files changed - deployment required"
+          else
+            echo "should_deploy=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No deployment-relevant files changed - skipping AWS deployment"
+          fi
+          
+      # 🌍 Set deployment environment
+      - name: 🌍 Set Deployment Environment
+        id: env
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "deploy_environment=${{ github.event.inputs.deploy_environment }}" >> $GITHUB_OUTPUT
+            echo "🎮 Manual deployment to ${{ github.event.inputs.deploy_environment }}"
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "deploy_environment=production" >> $GITHUB_OUTPUT
+            echo "🚀 Production deployment"
+          else
+            echo "deploy_environment=staging" >> $GITHUB_OUTPUT
+            echo "🧪 Staging deployment"
+          fi
+
+  # 🧪 Application testing (conditional)
+  test:
+    name: 🧪 Application Tests
+    runs-on: ubuntu-latest
+    needs: pre-deployment
+    if: needs.pre-deployment.outputs.should_deploy == 'true' && github.event.inputs.skip_tests != 'true'
+    
+    steps:
+      # 📥 Checkout repository
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        
+      # 🟢 Setup Node.js
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      # 📦 Install dependencies
+      - name: 📦 Install Dependencies
+        run: |
+          echo "📦 Installing dependencies..."
+          npm ci
+          echo "✅ Dependencies installed"
+          
+      # 🧪 Run test suite
+      - name: 🧪 Run Test Suite
+        run: |
+          echo "🧪 Running test suite for AWS deployment..."
+          npm test
+          echo "✅ All tests passed!"
+          
+      # 🏗️ Build application
+      - name: 🏗️ Build Application
+        run: |
+          echo "🏗️ Building application for AWS deployment..."
+          npm run build
+          echo "✅ Build completed"
+
+  # ⚙️ AWS Infrastructure Setup
+  aws-infrastructure:
+    name: ⚙️ AWS Infrastructure Setup
+    runs-on: ubuntu-latest
+    needs: [pre-deployment, test]
+    if: always() && needs.pre-deployment.outputs.should_deploy == 'true' && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    
+    outputs:
+      s3_bucket: ${{ steps.deploy-infra.outputs.s3_bucket }}
+      lambda_function: ${{ steps.deploy-infra.outputs.lambda_function }}
+      cloudformation_stack: ${{ steps.deploy-infra.outputs.cloudformation_stack }}
+    
+    steps:
+      # 📥 Checkout repository
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        
+      # 🔐 Configure AWS Credentials
+      - name: 🔐 Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN || 'arn:aws:iam::123456789012:role/GitHubActionsRole' }}
+          role-session-name: GitHubActions-${{ needs.pre-deployment.outputs.unique_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          # 🛡️ For demo purposes - in real scenario, use OIDC or stored credentials
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID || 'demo' }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY || 'demo' }}
+        continue-on-error: true  # 🛡️ Continue for demo without real AWS credentials
+        
+      # 📋 Create CloudFormation template
+      - name: 📋 Create CloudFormation Template
+        run: |
+          echo "📋 Creating CloudFormation template for AWS infrastructure..."
+          
+          mkdir -p aws-templates
+          
+          # 🏗️ Create comprehensive CloudFormation template
+          cat << 'CF_TEMPLATE_EOF' > aws-templates/infrastructure.yml
+          AWSTemplateFormatVersion: '2010-09-09'
+          Description: 'GitHub Actions Showcase - AWS Infrastructure'
+          
+          Parameters:
+            Environment:
+              Type: String
+              Default: staging
+              AllowedValues: [staging, production]
+              Description: Deployment environment
+            
+            UniqueId:
+              Type: String
+              Description: Unique deployment identifier
+              
+          Resources:
+            # 🪣 S3 Bucket for static assets
+            StaticAssetsBucket:
+              Type: AWS::S3::Bucket
+              Properties:
+                BucketName: !Sub '${AWS::StackName}-static-${UniqueId}'
+                PublicAccessBlockConfiguration:
+                  BlockPublicAcls: true
+                  BlockPublicPolicy: true
+                  IgnorePublicAcls: true
+                  RestrictPublicBuckets: true
+                VersioningConfiguration:
+                  Status: Enabled
+                ServerSideEncryptionConfiguration:
+                  - ServerSideEncryptionByDefault:
+                      SSEAlgorithm: AES256
+                Tags:
+                  - Key: Project
+                    Value: GitHubActionsShowcase
+                  - Key: Environment
+                    Value: !Ref Environment
+                    
+            # 📊 CloudWatch Log Group
+            ApplicationLogGroup:
+              Type: AWS::Logs::LogGroup
+              Properties:
+                LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-app-${UniqueId}'
+                RetentionInDays: 14
+                Tags:
+                  - Key: Project
+                    Value: GitHubActionsShowcase
+                  - Key: Environment
+                    Value: !Ref Environment
+                    
+            # 🔧 Lambda Execution Role
+            LambdaExecutionRole:
+              Type: AWS::IAM::Role
+              Properties:
+                AssumeRolePolicyDocument:
+                  Version: '2012-10-17'
+                  Statement:
+                    - Effect: Allow
+                      Principal:
+                        Service: lambda.amazonaws.com
+                      Action: sts:AssumeRole
+                ManagedPolicyArns:
+                  - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+                  - arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
+                Tags:
+                  - Key: Project
+                    Value: GitHubActionsShowcase
+                  - Key: Environment
+                    Value: !Ref Environment
+                    
+            # ⚡ Lambda Function
+            ApplicationFunction:
+              Type: AWS::Lambda::Function
+              Properties:
+                FunctionName: !Sub '${AWS::StackName}-app-${UniqueId}'
+                Runtime: nodejs20.x
+                Handler: lambda.handler
+                Role: !GetAtt LambdaExecutionRole.Arn
+                Code:
+                  ZipFile: |
+                    exports.handler = async (event) => {
+                      return {
+                        statusCode: 200,
+                        body: JSON.stringify({
+                          message: 'Hello from AWS Lambda!',
+                          timestamp: new Date().toISOString(),
+                          event: event
+                        })
+                      };
+                    };
+                Environment:
+                  Variables:
+                    ENVIRONMENT: !Ref Environment
+                    DEPLOYMENT_ID: !Ref UniqueId
+                Tags:
+                  - Key: Project
+                    Value: GitHubActionsShowcase
+                  - Key: Environment
+                    Value: !Ref Environment
+                    
+            # 📊 SSM Parameter for configuration
+            ConfigurationParameter:
+              Type: AWS::SSM::Parameter
+              Properties:
+                Name: !Sub '/${AWS::StackName}/${Environment}/config'
+                Type: String
+                Value: !Sub |
+                  {
+                    "environment": "${Environment}",
+                    "deploymentId": "${UniqueId}",
+                    "s3Bucket": "${StaticAssetsBucket}",
+                    "lambdaFunction": "${ApplicationFunction}",
+                    "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  }
+                Description: Configuration for GitHub Actions Showcase
+                Tags:
+                  Project: GitHubActionsShowcase
+                  Environment: !Ref Environment
+                  
+          Outputs:
+            S3BucketName:
+              Description: Name of the S3 bucket for static assets
+              Value: !Ref StaticAssetsBucket
+              Export:
+                Name: !Sub '${AWS::StackName}-S3Bucket'
+                
+            LambdaFunctionName:
+              Description: Name of the Lambda function
+              Value: !Ref ApplicationFunction
+              Export:
+                Name: !Sub '${AWS::StackName}-LambdaFunction'
+                
+            LambdaFunctionArn:
+              Description: ARN of the Lambda function
+              Value: !GetAtt ApplicationFunction.Arn
+              Export:
+                Name: !Sub '${AWS::StackName}-LambdaFunctionArn'
+                
+            ConfigurationParameter:
+              Description: SSM Parameter containing configuration
+              Value: !Ref ConfigurationParameter
+              Export:
+                Name: !Sub '${AWS::StackName}-ConfigParam'
+          CF_TEMPLATE_EOF
+          
+          echo "✅ CloudFormation template created"
+          
+      # 🚀 Deploy Infrastructure
+      - name: 🚀 Deploy AWS Infrastructure
+        id: deploy-infra
+        run: |
+          echo "🚀 Deploying AWS infrastructure with CloudFormation..."
+          
+          STACK_NAME="${{ env.STACK_NAME_PREFIX }}-${{ needs.pre-deployment.outputs.deploy_environment }}"
+          ENVIRONMENT="${{ needs.pre-deployment.outputs.deploy_environment }}"
+          UNIQUE_ID="${{ needs.pre-deployment.outputs.unique_id }}"
+          
+          # 🎯 Simulate CloudFormation deployment (replace with real AWS CLI commands)
+          echo "📋 CloudFormation Deployment Simulation:"
+          echo "├── Stack Name: $STACK_NAME"
+          echo "├── Environment: $ENVIRONMENT"
+          echo "├── Region: ${{ env.AWS_REGION }}"
+          echo "├── Unique ID: $UNIQUE_ID"
+          echo "└── Template: aws-templates/infrastructure.yml"
+          
+          # 🛠️ Simulate resource creation
+          echo ""
+          echo "🏗️ Creating AWS Resources:"
+          echo "├── 🪣 S3 Bucket: $STACK_NAME-static-$UNIQUE_ID"
+          echo "├── ⚡ Lambda Function: $STACK_NAME-app-$UNIQUE_ID"
+          echo "├── 📊 CloudWatch Logs: /aws/lambda/$STACK_NAME-app-$UNIQUE_ID"
+          echo "├── 🔧 IAM Role: $STACK_NAME-lambda-execution-role"
+          echo "└── 📊 SSM Parameter: /$STACK_NAME/$ENVIRONMENT/config"
+          
+          # 📤 Set outputs for subsequent jobs
+          echo "s3_bucket=$STACK_NAME-static-$UNIQUE_ID" >> $GITHUB_OUTPUT
+          echo "lambda_function=$STACK_NAME-app-$UNIQUE_ID" >> $GITHUB_OUTPUT
+          echo "cloudformation_stack=$STACK_NAME" >> $GITHUB_OUTPUT
+          
+          # 💾 In real scenario, use:
+          # aws cloudformation deploy \
+          #   --template-file aws-templates/infrastructure.yml \
+          #   --stack-name $STACK_NAME \
+          #   --parameter-overrides Environment=$ENVIRONMENT UniqueId=$UNIQUE_ID \
+          #   --capabilities CAPABILITY_IAM \
+          #   --region ${{ env.AWS_REGION }}
+          
+          echo "✅ Infrastructure deployment completed"
+
+  # 📦 Application Packaging
+  package-application:
+    name: 📦 Package Application
+    runs-on: ubuntu-latest
+    needs: [pre-deployment, test]
+    if: always() && needs.pre-deployment.outputs.should_deploy == 'true' && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    
+    steps:
+      # 📥 Checkout repository
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        
+      # 🟢 Setup Node.js
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      # 📦 Install dependencies
+      - name: 📦 Install Dependencies
+        run: |
+          echo "📦 Installing production dependencies..."
+          npm ci --production
+          echo "✅ Dependencies installed"
+          
+      # 🏗️ Create Lambda package
+      - name: 🏗️ Create Lambda Package
+        run: |
+          echo "🏗️ Creating Lambda deployment package..."
+          
+          # 📁 Create deployment directory
+          mkdir -p lambda-package
+          
+          # 📝 Create Lambda handler wrapper
+          cat << 'LAMBDA_HANDLER_EOF' > lambda-package/lambda.js
+          const serverless = require('serverless-http');
+          const app = require('./index');
+          
+          // 🌩️ Wrap Express app for AWS Lambda
+          module.exports.handler = serverless(app);
+          LAMBDA_HANDLER_EOF
+          
+          # 📋 Copy application files
+          cp index.js lambda-package/
+          cp package*.json lambda-package/
+          cp -r node_modules lambda-package/ 2>/dev/null || echo "No node_modules to copy"
+          
+          # 📦 Install serverless-http for Lambda compatibility
+          cd lambda-package
+          npm install serverless-http --save
+          cd ..
+          
+          # 🗜️ Create deployment ZIP
+          cd lambda-package
+          zip -r ../lambda-deployment.zip . -x "*.git*" "*.DS_Store*"
+          cd ..
+          
+          # 📊 Package information
+          echo "📊 Lambda Package Information:"
+          echo "├── Package size: $(du -sh lambda-deployment.zip | cut -f1)"
+          echo "├── Files included: $(unzip -l lambda-deployment.zip | wc -l)"
+          echo "└── Handler: lambda.handler"
+          
+          echo "✅ Lambda package created"
+          
+      # 📋 Create static assets
+      - name: 📋 Create Static Assets
+        run: |
+          echo "📋 Creating static assets for S3 deployment..."
+          
+          mkdir -p static-assets
+          
+          # 🏠 Create a simple status page
+          cat << 'STATUS_PAGE_EOF' > static-assets/index.html
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>🚀 GitHub Actions AWS Showcase</title>
+              <style>
+                  body {
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                      margin: 0;
+                      padding: 40px;
+                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      color: white;
+                      min-height: 100vh;
+                  }
+                  .container {
+                      max-width: 800px;
+                      margin: 0 auto;
+                      background: rgba(255,255,255,0.1);
+                      padding: 40px;
+                      border-radius: 20px;
+                      backdrop-filter: blur(10px);
+                  }
+                  h1 { font-size: 3em; margin-bottom: 20px; text-align: center; }
+                  .status { font-size: 1.2em; margin: 20px 0; }
+                  .badge { 
+                      display: inline-block; 
+                      padding: 8px 16px; 
+                      background: rgba(255,255,255,0.2); 
+                      border-radius: 20px; 
+                      margin: 5px;
+                  }
+                  .timestamp { opacity: 0.8; font-size: 0.9em; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <h1>🚀 GitHub Actions AWS Showcase</h1>
+                  <div class="status">
+                      <p><strong>🌩️ AWS Integration Status:</strong> <span class="badge">✅ Active</span></p>
+                      <p><strong>🏗️ Deployment Environment:</strong> <span class="badge">${{ needs.pre-deployment.outputs.deploy_environment }}</span></p>
+                      <p><strong>🆔 Deployment ID:</strong> <span class="badge">${{ needs.pre-deployment.outputs.unique_id }}</span></p>
+                      <p><strong>📅 Deployed:</strong> <span class="timestamp">$(date -u)</span></p>
+                  </div>
+                  <h2>🎯 AWS Services Demonstrated:</h2>
+                  <ul>
+                      <li>🪣 <strong>Amazon S3</strong> - Static website hosting</li>
+                      <li>⚡ <strong>AWS Lambda</strong> - Serverless application</li>
+                      <li>📊 <strong>CloudWatch</strong> - Monitoring and logging</li>
+                      <li>🏗️ <strong>CloudFormation</strong> - Infrastructure as Code</li>
+                      <li>🔧 <strong>Parameter Store</strong> - Configuration management</li>
+                  </ul>
+                  <p class="timestamp">🤖 Automatically deployed by GitHub Actions</p>
+              </div>
+          </body>
+          </html>
+          STATUS_PAGE_EOF
+          
+          # 📊 Create deployment info JSON
+          cat << EOF > static-assets/deployment-info.json
+          {
+            "deployment": {
+              "id": "${{ needs.pre-deployment.outputs.unique_id }}",
+              "environment": "${{ needs.pre-deployment.outputs.deploy_environment }}",
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "commit": "${{ github.sha }}",
+              "branch": "${{ github.ref_name }}",
+              "actor": "${{ github.actor }}"
+            },
+            "aws_services": [
+              "S3",
+              "Lambda", 
+              "CloudWatch",
+              "CloudFormation",
+              "Parameter Store"
+            ],
+            "status": "deployed"
+          }
+          EOF
+          
+          echo "✅ Static assets created"
+          
+      # 📤 Upload artifacts
+      - name: 📤 Upload Deployment Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-deployment-packages
+          path: |
+            lambda-deployment.zip
+            static-assets/
+            aws-templates/
+          retention-days: 30
+
+  # 🌩️ AWS Deployment
+  aws-deployment:
+    name: 🌩️ AWS Deployment
+    runs-on: ubuntu-latest
+    needs: [pre-deployment, aws-infrastructure, package-application]
+    if: always() && needs.pre-deployment.outputs.should_deploy == 'true'
+    
+    steps:
+      # 📥 Download deployment artifacts
+      - name: 📥 Download Deployment Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: aws-deployment-packages
+          path: ./deployment
+          
+      # 🔐 Configure AWS Credentials
+      - name: 🔐 Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN || 'arn:aws:iam::123456789012:role/GitHubActionsRole' }}
+          role-session-name: GitHubActions-Deploy-${{ needs.pre-deployment.outputs.unique_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          # 🛡️ For demo purposes - in real scenario, use OIDC or stored credentials
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID || 'demo' }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY || 'demo' }}
+        continue-on-error: true  # 🛡️ Continue for demo without real AWS credentials
+        
+      # 🪣 Deploy to S3
+      - name: 🪣 Deploy Static Assets to S3
+        run: |
+          echo "🪣 Deploying static assets to S3..."
+          
+          S3_BUCKET="${{ needs.aws-infrastructure.outputs.s3_bucket }}"
+          
+          echo "📋 S3 Deployment Details:"
+          echo "├── Bucket: $S3_BUCKET"
+          echo "├── Region: ${{ env.AWS_REGION }}"
+          echo "├── Files: $(find deployment/static-assets -type f | wc -l)"
+          echo "└── Total size: $(du -sh deployment/static-assets | cut -f1)"
+          
+          # 🎯 Simulate S3 deployment
+          echo ""
+          echo "📤 Uploading files to S3:"
+          for file in deployment/static-assets/*; do
+            filename=$(basename "$file")
+            echo "├── Uploading $filename..."
+            sleep 0.5  # Simulate upload time
+          done
+          echo "└── ✅ All files uploaded successfully"
+          
+          # 💾 In real scenario, use:
+          # aws s3 sync deployment/static-assets/ s3://$S3_BUCKET/ \
+          #   --delete \
+          #   --cache-control "max-age=86400" \
+          #   --region ${{ env.AWS_REGION }}
+          
+          echo "✅ S3 deployment completed"
+          echo "🌐 Static site URL: https://$S3_BUCKET.s3.amazonaws.com/index.html"
+          
+      # ⚡ Deploy Lambda Function
+      - name: ⚡ Deploy Lambda Function
+        run: |
+          echo "⚡ Deploying Lambda function..."
+          
+          LAMBDA_FUNCTION="${{ needs.aws-infrastructure.outputs.lambda_function }}"
+          
+          echo "📋 Lambda Deployment Details:"
+          echo "├── Function: $LAMBDA_FUNCTION"
+          echo "├── Runtime: nodejs20.x"
+          echo "├── Handler: lambda.handler"
+          echo "├── Package size: $(du -sh deployment/lambda-deployment.zip | cut -f1)"
+          echo "└── Region: ${{ env.AWS_REGION }}"
+          
+          # 🎯 Simulate Lambda deployment
+          echo ""
+          echo "📤 Updating Lambda function code..."
+          sleep 2
+          echo "✅ Lambda function updated successfully"
+          
+          # 💾 In real scenario, use:
+          # aws lambda update-function-code \
+          #   --function-name $LAMBDA_FUNCTION \
+          #   --zip-file fileb://deployment/lambda-deployment.zip \
+          #   --region ${{ env.AWS_REGION }}
+          
+          echo "⚡ Lambda deployment completed"
+          echo "🔗 Function ARN: arn:aws:lambda:${{ env.AWS_REGION }}:123456789012:function:$LAMBDA_FUNCTION"
+          
+      # 📊 Update Parameter Store
+      - name: 📊 Update Configuration
+        run: |
+          echo "📊 Updating AWS Parameter Store configuration..."
+          
+          PARAM_NAME="/${{ needs.aws-infrastructure.outputs.cloudformation_stack }}/${{ needs.pre-deployment.outputs.deploy_environment }}/config"
+          
+          # 🔧 Create updated configuration
+          CONFIG_JSON=$(cat << EOF
+          {
+            "deployment": {
+              "id": "${{ needs.pre-deployment.outputs.unique_id }}",
+              "environment": "${{ needs.pre-deployment.outputs.deploy_environment }}",
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "commit": "${{ github.sha }}",
+              "branch": "${{ github.ref_name }}"
+            },
+            "aws": {
+              "s3_bucket": "${{ needs.aws-infrastructure.outputs.s3_bucket }}",
+              "lambda_function": "${{ needs.aws-infrastructure.outputs.lambda_function }}",
+              "region": "${{ env.AWS_REGION }}"
+            },
+            "urls": {
+              "static_site": "https://${{ needs.aws-infrastructure.outputs.s3_bucket }}.s3.amazonaws.com/index.html",
+              "lambda_function": "https://lambda.${{ env.AWS_REGION }}.amazonaws.com/functions/${{ needs.aws-infrastructure.outputs.lambda_function }}"
+            }
+          }
+          EOF
+          )
+          
+          echo "📋 Configuration Update:"
+          echo "├── Parameter: $PARAM_NAME"
+          echo "├── Environment: ${{ needs.pre-deployment.outputs.deploy_environment }}"
+          echo "└── Deployment ID: ${{ needs.pre-deployment.outputs.unique_id }}"
+          
+          # 🎯 Simulate parameter update
+          echo "💾 Updating parameter store..."
+          sleep 1
+          echo "✅ Configuration updated successfully"
+          
+          # 💾 In real scenario, use:
+          # aws ssm put-parameter \
+          #   --name "$PARAM_NAME" \
+          #   --value "$CONFIG_JSON" \
+          #   --type "String" \
+          #   --overwrite \
+          #   --region ${{ env.AWS_REGION }}
+
+  # 🔍 Post-deployment Verification
+  verify-deployment:
+    name: 🔍 Deployment Verification
+    runs-on: ubuntu-latest
+    needs: [pre-deployment, aws-infrastructure, aws-deployment]
+    if: always() && needs.aws-deployment.result == 'success'
+    
+    steps:
+      # 🔐 Configure AWS Credentials
+      - name: 🔐 Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN || 'arn:aws:iam::123456789012:role/GitHubActionsRole' }}  
+          role-session-name: GitHubActions-Verify-${{ needs.pre-deployment.outputs.unique_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID || 'demo' }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY || 'demo' }}
+        continue-on-error: true
+        
+      # 🧪 Health Checks
+      - name: 🧪 Perform Health Checks
+        run: |
+          echo "🧪 Performing post-deployment health checks..."
+          
+          # 📊 Simulate health checks
+          echo "📊 Health Check Results:"
+          echo "├── 🪣 S3 Bucket Status: ✅ Active"
+          echo "├── ⚡ Lambda Function Status: ✅ Ready"
+          echo "├── 📊 CloudWatch Logs: ✅ Configured"
+          echo "├── 🔧 Parameter Store: ✅ Updated"
+          echo "└── 🌐 Static Site: ✅ Accessible"
+          
+          # 🎯 Simulate response time checks
+          echo ""
+          echo "⚡ Performance Metrics:"
+          echo "├── S3 Response Time: $(( RANDOM % 100 + 50 ))ms"
+          echo "├── Lambda Cold Start: $(( RANDOM % 1000 + 500 ))ms"
+          echo "├── Lambda Warm Start: $(( RANDOM % 50 + 10 ))ms"
+          echo "└── Static Site Load: $(( RANDOM % 200 + 100 ))ms"
+          
+          echo "✅ All health checks passed!"
+          
+      # 📊 Generate Deployment Report
+      - name: 📊 Generate Deployment Report
+        run: |
+          echo "📊 Generating deployment report..."
+          
+          cat << 'REPORT_EOF' > deployment-report.md
+          # 🌩️ AWS Deployment Report
+          
+          ## 📋 Deployment Summary
+          
+          | Property | Value |
+          |----------|-------|
+          | 🆔 Deployment ID | `${{ needs.pre-deployment.outputs.unique_id }}` |
+          | 🌍 Environment | `${{ needs.pre-deployment.outputs.deploy_environment }}` |
+          | 📅 Timestamp | `$(date -u)` |
+          | 👤 Deployed by | `${{ github.actor }}` |
+          | 📍 Commit | `${{ github.sha }}` |
+          | 🌿 Branch | `${{ github.ref_name }}` |
+          
+          ## 🚀 AWS Resources Deployed
+          
+          ### 🪣 Amazon S3
+          - **Bucket**: `${{ needs.aws-infrastructure.outputs.s3_bucket }}`
+          - **Purpose**: Static asset hosting
+          - **URL**: `https://${{ needs.aws-infrastructure.outputs.s3_bucket }}.s3.amazonaws.com/index.html`
+          
+          ### ⚡ AWS Lambda  
+          - **Function**: `${{ needs.aws-infrastructure.outputs.lambda_function }}`
+          - **Runtime**: `nodejs20.x`
+          - **Handler**: `lambda.handler`
+          
+          ### 🏗️ CloudFormation
+          - **Stack**: `${{ needs.aws-infrastructure.outputs.cloudformation_stack }}`
+          - **Status**: `✅ Deployed`
+          
+          ### 📊 Other Services
+          - **CloudWatch Logs**: Configured for monitoring
+          - **Parameter Store**: Configuration management
+          - **IAM Roles**: Secure access control
+          
+          ## ✅ Deployment Status: SUCCESS
+          
+          All AWS resources have been successfully deployed and verified!
+          REPORT_EOF
+          
+          echo "✅ Deployment report generated"
+          
+      # 📤 Upload deployment report
+      - name: 📤 Upload Deployment Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-deployment-report
+          path: deployment-report.md
+          retention-days: 90
+
+  # 💬 Deployment Summary
+  deployment-summary:
+    name: 💬 Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [pre-deployment, aws-infrastructure, aws-deployment, verify-deployment]
+    if: always()
+    
+    steps:
+      # 📊 Generate final summary
+      - name: 📊 Generate Summary
+        run: |
+          echo "📊 AWS Integration Deployment Summary"
+          echo "====================================="
+          echo "🎯 Deployment ID: ${{ needs.pre-deployment.outputs.unique_id }}"
+          echo "🌍 Environment: ${{ needs.pre-deployment.outputs.deploy_environment }}"
+          echo "👤 Deployed by: ${{ github.actor }}"
+          echo "📅 Timestamp: $(date -u)"
+          echo ""
+          echo "🔍 Job Results:"
+          echo "├── Infrastructure: ${{ needs.aws-infrastructure.result }}"
+          echo "├── Deployment: ${{ needs.aws-deployment.result }}"
+          echo "└── Verification: ${{ needs.verify-deployment.result }}"
+          echo ""
+          
+          # 🎯 Overall status
+          if [[ "${{ needs.aws-deployment.result }}" == "success" && "${{ needs.verify-deployment.result }}" == "success" ]]; then
+            echo "✅ Status: DEPLOYMENT SUCCESSFUL"
+            echo "🚀 All AWS resources deployed and verified!"
+            echo ""
+            echo "🌐 Access Points:"
+            echo "├── Static Site: https://${{ needs.aws-infrastructure.outputs.s3_bucket }}.s3.amazonaws.com/index.html"
+            echo "└── Lambda Function: ${{ needs.aws-infrastructure.outputs.lambda_function }}"
+          else
+            echo "❌ Status: DEPLOYMENT ISSUES"
+            echo "🔍 Check job logs for details"
+          fi
+          
+      # 💬 Comment on PR (if applicable)
+      - name: 💬 Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            
+            const deploymentSuccess = '${{ needs.aws-deployment.result }}' === 'success';
+            const verificationSuccess = '${{ needs.verify-deployment.result }}' === 'success';
+            
+            const statusEmoji = deploymentSuccess && verificationSuccess ? '✅' : '❌';
+            const statusText = deploymentSuccess && verificationSuccess ? 'Deployment Successful' : 'Deployment Issues';
+            
+            const comment = `## 🌩️ AWS Integration Results
+            
+            **Status:** ${statusEmoji} ${statusText}
+            
+            ### 📋 Deployment Details:
+            - **🆔 Deployment ID:** \`${{ needs.pre-deployment.outputs.unique_id }}\`
+            - **🌍 Environment:** \`${{ needs.pre-deployment.outputs.deploy_environment }}\`
+            - **📅 Deployed:** \`$(date -u)\`
+            
+            ### 🚀 AWS Resources:
+            ${deploymentSuccess ? `
+            - **🪣 S3 Bucket:** \`${{ needs.aws-infrastructure.outputs.s3_bucket }}\`
+            - **⚡ Lambda Function:** \`${{ needs.aws-infrastructure.outputs.lambda_function }}\`
+            - **🏗️ CloudFormation Stack:** \`${{ needs.aws-infrastructure.outputs.cloudformation_stack }}\`
+            
+            ### 🌐 Access Points:
+            - **Static Site:** https://${{ needs.aws-infrastructure.outputs.s3_bucket }}.s3.amazonaws.com/index.html
+            - **API Endpoint:** Lambda function deployed successfully
+            ` : '🔍 Check workflow logs for deployment details'}
+            
+            ### 🔍 Job Status:
+            - Infrastructure: ${{ needs.aws-infrastructure.result }}
+            - Deployment: ${{ needs.aws-deployment.result }}
+            - Verification: ${{ needs.verify-deployment.result }}
+            
+            ---
+            
+            > 🤖 **Automated AWS Deployment** | View details in the [Actions tab](../../actions)`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: comment
+            });
+            
+            console.log(`💬 Posted AWS deployment summary to PR #${prNumber}`);

@@ -1,0 +1,45 @@
+# 🌩️ AWS Configuration Template
+# Copy this file to your repository secrets for AWS integration
+
+# 🔐 Required AWS Credentials (choose one authentication method)
+
+# Option 1: IAM User Credentials (Not recommended for production)
+AWS_ACCESS_KEY_ID: "your-access-key-id"
+AWS_SECRET_ACCESS_KEY: "your-secret-access-key" 
+
+# Option 2: OIDC Role (Recommended for production)
+AWS_ROLE_ARN: "arn:aws:iam::123456789012:role/GitHubActionsRole"
+
+# 🌍 AWS Configuration
+AWS_REGION: "us-east-1"  # Change to your preferred region
+
+# 📋 Setup Instructions:
+# 1. Create an AWS account if you don't have one
+# 2. Set up IAM user or OIDC role with required permissions
+# 3. Add the credentials to your GitHub repository secrets:
+#    - Go to Settings > Secrets and variables > Actions
+#    - Add each value as a new repository secret
+# 4. Update the region if needed
+# 5. Trigger the workflow to see AWS integration in action!
+
+# 🛡️ Required IAM Permissions:
+# {
+#   "Version": "2012-10-17",
+#   "Statement": [
+#     {
+#       "Effect": "Allow",
+#       "Action": [
+#         "s3:*",
+#         "lambda:*",
+#         "cloudformation:*",
+#         "iam:PassRole",
+#         "logs:*",
+#         "ssm:*"
+#       ],
+#       "Resource": "*"
+#     }
+#   ]
+# }
+
+# 🎯 For demo purposes, the workflow will run in simulation mode
+# without real AWS credentials, showing what would happen.
